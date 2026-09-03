@@ -1,0 +1,146 @@
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #121212;
+    color: #ffffff;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+}
+
+h1 {
+    margin: 0 0 15px 0;
+    font-size: 24px;
+    letter-spacing: 0.5px;
+}
+
+.controls {
+    margin-bottom: 15px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+button {
+    padding: 10px 16px;
+    background-color: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+button:hover {
+    background-color: #3d3d3d;
+    border-color: #666;
+}
+
+button.active {
+    background-color: #00ccff;
+    color: #111;
+    font-weight: 700;
+    border-color: #00ccff;
+    box-shadow: 0 0 10px rgba(0, 204, 255, 0.4);
+}
+
+.info-bar {
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: #aaa;
+}
+
+.map-wrapper {
+    position: relative;
+    border: 2px solid #333;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #1a1a1a;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.map {
+    width: 800px;
+    height: 800px;
+    background-color: #1e1e1e;
+    position: relative;
+    cursor: crosshair;
+    user-select: none;
+    transform-origin: 0 0;
+}
+
+.cell {
+    width: 40px;
+    height: 40px;
+    border: 1px solid #2d2d2d;
+    position: absolute;
+    box-sizing: border-box;
+    transition: background-color 0.15s ease;
+}
+
+.cell:hover {
+    opacity: 0.85;
+    border-color: #555;
+}
+
+.road {
+    background-color: #333333;
+}
+
+.wall {
+    background-color: #d32f2f;
+}
+
+.traffic-light {
+    background-color: #ffcc00;
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.4);
+}
+
+.traffic-light.red {
+    background-color: #e53935;
+}
+
+.traffic-light.yellow {
+    background-color: #fbc02d;
+}
+
+.shortcut {
+    background-color: #2e7d32;
+}
+
+.start {
+    background-color: #00b0ff;
+    box-shadow: 0 0 10px #00b0ff;
+}
+
+.end {
+    background-color: #e040fb;
+    box-shadow: 0 0 10px #e040fb;
+}
+
+.path {
+    background-color: #00e676 !important;
+    box-shadow: inset 0 0 6px rgba(255, 255, 255, 0.6);
+}
+
+.car {
+    width: 24px;
+    height: 24px;
+    background-color: #ff9100;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    position: absolute;
+    z-index: 10;
+    pointer-events: none;
+    transition: left 0.25s linear, top 0.25s linear;
+    transform: translate(6px, 6px);
+    box-shadow: 0 0 8px #ff9100;
+} 

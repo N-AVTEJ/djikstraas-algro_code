@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive City Navigation</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Interactive City Navigation</h1>
+        <div class="controls">
+            <button id="placeWall" class="active">Place Wall</button>
+            <button id="toggleTrafficLight">Toggle Traffic Light</button>
+            <button id="setStart">Set Start</button>
+            <button id="setEnd">Set End</button>
+            <button id="addShortcut">Add Shortcut</button>
+            <button id="resetMap">Reset Map</button>
+        </div>
+        <div class="info-bar" id="infoBar">Select a tool and click on the grid to build your city map.</div>
+        <div class="map-wrapper">
+            <div id="map" class="map"></div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html> 

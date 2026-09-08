@@ -1,382 +1,528 @@
-const GRID_SIZE = 20;
-const CELL_SIZE = 40;
-const map = document.getElementById('map');
-const infoBar = document.getElementById('infoBar');
+/**
+ * ============================================================================
+ * MAIN APPLICATION CONTROLLER (script.js)
+ * ============================================================================
+ * 
+ * Orchestrates the application components:
+ * - MapManager (Leaflet UI)
+ * - CityGraph (Graph Data Structure)
+ * - DijkstraSolver (Pure JS Shortest Path Algorithm)
+ * - TrafficLightManager (Real-Time 3s Traffic Cycle)
+ * - VehicleSimulator (Vehicle Animation & Dynamic Rerouting)
+ */
 
-let grid = [];
-let start = null;
-let end = null;
-let activeCar = null;
-let carAnimationTimeout = null;
-let currentPath = [];
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. Instantiate Core Subsystems
+    const graph = new CityGraph();
+    const mapManager = new MapManager('map', graph);
+    const vehicle = new VehicleSimulator(mapManager.map);
 
-// Initialize the grid
-function initGrid() {
-    map.innerHTML = '';
-    grid = [];
-    for (let i = 0; i < GRID_SIZE; i++) {
-        grid[i] = [];
-        for (let j = 0; j < GRID_SIZE; j++) {
-            const cell = document.createElement('div');
-            cell.className = 'cell road';
-            cell.style.left = j * CELL_SIZE + 'px';
-            cell.style.top = i * CELL_SIZE + 'px';
-            cell.dataset.row = i;
-            cell.dataset.col = j;
-            cell.addEventListener('click', handleCellClick);
-            map.appendChild(cell);
-            grid[i][j] = { type: 'road', element: cell, lightState: 'yellow' };
-        }
-    }
-}
+    let currentRouteResult = null;
+    let isAutoTrafficEnabled = true;
+    let isVisualizingAlgorithm = false;
+    let visualizationAbortController = null;
 
-// Handle cell click events
-function handleCellClick(event) {
-    const cell = event.currentTarget;
-    const row = parseInt(cell.dataset.row);
-    const col = parseInt(cell.dataset.col);
-    const activeBtn = document.querySelector('.controls button.active');
-    const action = activeBtn ? activeBtn.id : 'placeWall';
+    // 2. Instantiate Traffic Manager with real-time recalculation callback
+    const trafficManager = new TrafficLightManager(graph, (event) => {
+        // Re-render markers for updated traffic lights
+        mapManager.renderGraphLayers();
 
-    // Prevent changing start/end into wall directly unless changing start/end
-    const isStartCell = start && start.row === row && start.col === col;
-    const isEndCell = end && end.row === row && end.col === col;
-
-    switch (action) {
-        case 'placeWall':
-            if (isStartCell || isEndCell) return;
-            if (grid[row][col].type === 'wall') {
-                grid[row][col].type = 'road';
-                cell.className = 'cell road';
-            } else {
-                grid[row][col].type = 'wall';
-                cell.className = 'cell wall';
-            }
-            break;
-
-        case 'toggleTrafficLight':
-            if (isStartCell || isEndCell) return;
-            if (grid[row][col].type === 'traffic-light') {
-                grid[row][col].type = 'road';
-                cell.className = 'cell road';
-            } else {
-                grid[row][col].type = 'traffic-light';
-                grid[row][col].lightState = 'yellow';
-                cell.className = 'cell traffic-light yellow';
-            }
-            break;
-
-        case 'setStart':
-            if (isEndCell) return;
-            if (start) {
-                grid[start.row][start.col].element.className = 'cell ' + grid[start.row][start.col].type;
-            }
-            start = { row, col };
-            grid[row][col].type = 'road';
-            cell.className = 'cell start';
-            infoBar.textContent = 'Start point placed. Set an End point to find the route.';
-            break;
-
-        case 'setEnd':
-            if (isStartCell) return;
-            if (end) {
-                grid[end.row][end.col].element.className = 'cell ' + grid[end.row][end.col].type;
-            }
-            end = { row, col };
-            grid[row][col].type = 'road';
-            cell.className = 'cell end';
-            infoBar.textContent = 'End point placed. Calculating optimal path...';
-            break;
-
-        case 'addShortcut':
-            if (isStartCell || isEndCell) return;
-            if (grid[row][col].type === 'shortcut') {
-                grid[row][col].type = 'road';
-                cell.className = 'cell road';
-            } else {
-                grid[row][col].type = 'shortcut';
-                cell.className = 'cell shortcut';
-            }
-            break;
-    }
-
-    if (start && end) {
-        findPath();
-    }
-}
-
-// Clear path highlighting
-function clearPathHighlight() {
-    for (let i = 0; i < GRID_SIZE; i++) {
-        for (let j = 0; j < GRID_SIZE; j++) {
-            const cellData = grid[i][j];
-            const isStart = start && start.row === i && start.col === j;
-            const isEnd = end && end.row === i && end.col === j;
-
-            if (isStart) {
-                cellData.element.className = 'cell start';
-            } else if (isEnd) {
-                cellData.element.className = 'cell end';
-            } else if (cellData.type === 'traffic-light') {
-                cellData.element.className = `cell traffic-light ${cellData.lightState}`;
-            } else {
-                cellData.element.className = `cell ${cellData.type}`;
-            }
-        }
-    }
-}
-
-// Enhanced pathfinding with traffic light cost and shortcuts
-function findPath() {
-    if (!start || !end) return;
-
-    clearPathHighlight();
-
-    const distances = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(Infinity));
-    const previous = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
-    const unvisited = new Set();
-
-    for (let i = 0; i < GRID_SIZE; i++) {
-        for (let j = 0; j < GRID_SIZE; j++) {
-            unvisited.add(`${i},${j}`);
-        }
-    }
-
-    distances[start.row][start.col] = 0;
-
-    while (unvisited.size > 0) {
-        let minDist = Infinity;
-        let current = null;
-
-        for (const pos of unvisited) {
-            const [r, c] = pos.split(',').map(Number);
-            if (distances[r][c] < minDist) {
-                minDist = distances[r][c];
-                current = { row: r, col: c };
-            }
-        }
-
-        if (!current || minDist === Infinity) break;
-
-        unvisited.delete(`${current.row},${current.col}`);
-
-        if (current.row === end.row && current.col === end.col) break;
-
-        const neighbors = [
-            { row: current.row - 1, col: current.col },
-            { row: current.row + 1, col: current.col },
-            { row: current.row, col: current.col - 1 },
-            { row: current.row, col: current.col + 1 }
-        ];
-
-        for (const neighbor of neighbors) {
-            if (neighbor.row < 0 || neighbor.row >= GRID_SIZE || neighbor.col < 0 || neighbor.col >= GRID_SIZE) continue;
-            if (grid[neighbor.row][neighbor.col].type === 'wall') continue;
-
-            let cost = 1;
-            const neighborCell = grid[neighbor.row][neighbor.col];
-            if (neighborCell.type === 'shortcut') {
-                cost = 0.5;
-            } else if (neighborCell.type === 'traffic-light') {
-                cost = neighborCell.lightState === 'red' ? 4 : 1.5;
-            }
-
-            const newDist = distances[current.row][current.col] + cost;
-
-            if (newDist < distances[neighbor.row][neighbor.col]) {
-                distances[neighbor.row][neighbor.col] = newDist;
-                previous[neighbor.row][neighbor.col] = current;
-            }
-        }
-    }
-
-    if (distances[end.row][end.col] === Infinity) {
-        infoBar.textContent = '⚠️ No path possible between Start and End (blocked by walls).';
-        if (activeCar) {
-            activeCar.remove();
-            activeCar = null;
-        }
-        return;
-    }
-
-    currentPath = [];
-    let curr = end;
-    while (curr) {
-        currentPath.unshift(curr);
-        if (curr.row === start.row && curr.col === start.col) break;
-        curr = previous[curr.row][curr.col];
-    }
-
-    // Highlight path
-    for (let i = 1; i < currentPath.length - 1; i++) {
-        const pt = currentPath[i];
-        grid[pt.row][pt.col].element.classList.add('path');
-    }
-
-    infoBar.textContent = `✅ Path found! Steps: ${currentPath.length - 1}, Total Cost: ${distances[end.row][end.col].toFixed(1)}`;
-    animateCarOnPath(currentPath);
-}
-
-// Animate car on found path
-function animateCarOnPath(path) {
-    if (carAnimationTimeout) {
-        clearTimeout(carAnimationTimeout);
-    }
-
-    if (!activeCar) {
-        activeCar = document.createElement('div');
-        activeCar.className = 'car';
-        map.appendChild(activeCar);
-    }
-
-    let stepIndex = 0;
-
-    function moveStep() {
-        if (!activeCar || !path || stepIndex >= path.length) return;
-        const pt = path[stepIndex];
-        activeCar.style.left = (pt.col * CELL_SIZE) + 'px';
-        activeCar.style.top = (pt.row * CELL_SIZE) + 'px';
-        stepIndex++;
-
-        if (stepIndex < path.length) {
-            carAnimationTimeout = setTimeout(moveStep, 250);
-        } else {
-            // Loop car animation after reaching end
-            carAnimationTimeout = setTimeout(() => {
-                stepIndex = 0;
-                moveStep();
-            }, 1200);
-        }
-    }
-
-    moveStep();
-}
-
-// Traffic light blinking
-function blinkTrafficLights() {
-    let hasTrafficLights = false;
-    for (let i = 0; i < GRID_SIZE; i++) {
-        for (let j = 0; j < GRID_SIZE; j++) {
-            const cell = grid[i][j];
-            if (cell.type === 'traffic-light') {
-                hasTrafficLights = true;
-                cell.lightState = cell.lightState === 'yellow' ? 'red' : 'yellow';
-                cell.element.className = `cell traffic-light ${cell.lightState}`;
-            }
-        }
-    }
-
-    // If lights changed and start/end are present, recalculate route cost
-    if (hasTrafficLights && start && end) {
-        findPath();
-    }
-
-    setTimeout(blinkTrafficLights, 3000);
-}
-
-// Add hurdles to the grid
-function addHurdles() {
-    let count = 0;
-    while (count < 8) {
-        const row = Math.floor(Math.random() * GRID_SIZE);
-        const col = Math.floor(Math.random() * GRID_SIZE);
-        if (grid[row][col].type === 'road') {
-            grid[row][col].type = 'wall';
-            grid[row][col].element.className = 'cell wall';
-            count++;
-        }
-    }
-}
-
-// Reset the grid and remove all elements
-function resetGrid() {
-    if (carAnimationTimeout) clearTimeout(carAnimationTimeout);
-    if (activeCar) {
-        activeCar.remove();
-        activeCar = null;
-    }
-
-    grid.forEach(row => row.forEach(cell => {
-        cell.type = 'road';
-        cell.lightState = 'yellow';
-        cell.element.className = 'cell road';
-    }));
-
-    start = null;
-    end = null;
-    currentPath = [];
-    infoBar.textContent = 'Map reset. Select tools above to draw and configure your city map.';
-}
-
-// Zoom and pan functionality
-let scale = 1;
-let offsetX = 0;
-let offsetY = 0;
-let isDragging = false;
-let startX = 0;
-let startY = 0;
-
-function updateMapTransform() {
-    map.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
-}
-
-map.parentElement.addEventListener('mousedown', (e) => {
-    // Only pan when middle click or alt + left click
-    if (e.button === 1 || (e.button === 0 && e.altKey)) {
-        isDragging = true;
-        startX = e.clientX - offsetX;
-        startY = e.clientY - offsetY;
-        e.preventDefault();
-    }
-});
-
-window.addEventListener('mousemove', (e) => {
-    if (isDragging) {
-        offsetX = e.clientX - startX;
-        offsetY = e.clientY - startY;
-        updateMapTransform();
-    }
-});
-
-window.addEventListener('mouseup', () => {
-    isDragging = false;
-});
-
-map.parentElement.addEventListener('wheel', (e) => {
-    if (e.ctrlKey) {
-        e.preventDefault();
-        if (e.deltaY < 0) {
-            scale = Math.min(scale * 1.1, 2.5);
-        } else {
-            scale = Math.max(scale / 1.1, 0.5);
-        }
-        updateMapTransform();
-    }
-}, { passive: false });
-
-// Control button click handling
-document.querySelectorAll('.controls button').forEach(button => {
-    button.addEventListener('click', () => {
-        if (button.id === 'resetMap') return;
-        document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
-        button.classList.add('active');
-
-        const toolNames = {
-            placeWall: 'Wall Tool (Click cells to toggle walls)',
-            toggleTrafficLight: 'Traffic Light Tool (Click cells to add/remove traffic lights)',
-            setStart: 'Start Point Tool (Click a cell to set origin)',
-            setEnd: 'Destination Tool (Click a cell to set destination)',
-            addShortcut: 'Shortcut Tool (Click cells to add high-speed green paths)'
-        };
-        if (toolNames[button.id]) {
-            infoBar.textContent = `Selected: ${toolNames[button.id]}`;
+        // If a route is active and start/end are set, trigger dynamic recalculation
+        if (mapManager.startNodeId && mapManager.endNodeId && !isVisualizingAlgorithm) {
+            handleDynamicRecalculate();
         }
     });
+
+    // Start auto traffic 3-second cycle
+    trafficManager.start();
+
+    // 3. UI DOM Element References
+    const elements = {
+        // Toolbar Tool Buttons
+        toolBtns: document.querySelectorAll('.tool-btn'),
+        btnSelect: document.getElementById('toolSelect'),
+        btnStart: document.getElementById('toolStart'),
+        btnEnd: document.getElementById('toolEnd'),
+        btnWall: document.getElementById('toolWall'),
+        btnTrafficLight: document.getElementById('toolTrafficLight'),
+        btnShortcut: document.getElementById('toolShortcut'),
+
+        // Action Buttons
+        btnRunDijkstra: document.getElementById('btnRunDijkstra'),
+        btnVisualizeAlgo: document.getElementById('btnVisualizeAlgo'),
+        btnClearRoute: document.getElementById('btnClearRoute'),
+        btnResetMap: document.getElementById('btnResetMap'),
+
+        // Vehicle Controls
+        btnVehiclePlay: document.getElementById('btnVehiclePlay'),
+        btnVehiclePause: document.getElementById('btnVehiclePause'),
+        btnVehicleReset: document.getElementById('btnVehicleReset'),
+        vehicleSpeedSelect: document.getElementById('vehicleSpeedSelect'),
+
+        // Toggles
+        toggleGraph: document.getElementById('toggleGraphOverlay'),
+        toggleAutoTraffic: document.getElementById('toggleAutoTraffic'),
+
+        // Info Banner & Status
+        infoBanner: document.getElementById('infoBanner'),
+        routeStatusBadge: document.getElementById('routeStatusBadge'),
+
+        // Statistics Display Elements
+        statStartLoc: document.getElementById('statStartLoc'),
+        statEndLoc: document.getElementById('statEndLoc'),
+        statWeightedCost: document.getElementById('statWeightedCost'),
+        statDistance: document.getElementById('statDistance'),
+        statSteps: document.getElementById('statSteps'),
+        statTrafficLights: document.getElementById('statTrafficLights'),
+        statShortcuts: document.getElementById('statShortcuts'),
+        statObstacles: document.getElementById('statObstacles'),
+        statExecTime: document.getElementById('statExecTime'),
+
+        // Step visualizer log box
+        algoLogPanel: document.getElementById('algoLogPanel'),
+        algoLogContent: document.getElementById('algoLogContent'),
+        btnCloseAlgoLog: document.getElementById('btnCloseAlgoLog')
+    };
+
+    // 4. Set Active Tool Handler
+    function setActiveTool(toolName) {
+        mapManager.activeTool = toolName;
+        elements.toolBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tool === toolName);
+        });
+
+        const toolDescriptions = {
+            'select': '🔍 Select Tool: Click any intersection or road to inspect details.',
+            'start': '🔵 Set Start Tool: Click any intersection to place the origin point.',
+            'end': '🟣 Set Destination Tool: Click any intersection to place the destination.',
+            'wall': '🧱 Obstacle Tool: Click roads or intersections to block them (Cost = ∞).',
+            'traffic-light': '🚦 Traffic Light Tool: Click intersections to add/remove traffic lights (Yellow 1.5 ↔ Red 4.0).',
+            'shortcut': '🟢 Express Shortcut Tool: Click road segments to toggle 0.5x high-speed status.'
+        };
+
+        showBanner(toolDescriptions[toolName] || 'Select a tool from the toolbar.');
+    }
+
+    elements.toolBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            setActiveTool(btn.dataset.tool);
+        });
+    });
+
+    // 5. Map and Node Click Logic
+    mapManager.onNodeClickCallback = (node) => {
+        handleNodeInteraction(node);
+    };
+
+    mapManager.onEdgeClickCallback = (edge) => {
+        handleEdgeInteraction(edge);
+    };
+
+    mapManager.onMapClickCallback = (latlng) => {
+        // Find nearest node or edge
+        if (mapManager.activeTool === 'start' || mapManager.activeTool === 'end' || mapManager.activeTool === 'traffic-light') {
+            const nearestNode = mapManager.findNearestNode(latlng.lat, latlng.lng);
+            if (nearestNode) {
+                handleNodeInteraction(nearestNode);
+            } else {
+                showBanner('📍 No city intersection found near clicked position. Please click closer to a node.', 'warning');
+            }
+        } else if (mapManager.activeTool === 'wall' || mapManager.activeTool === 'shortcut') {
+            const nearestEdge = mapManager.findNearestEdge(latlng.lat, latlng.lng);
+            if (nearestEdge) {
+                handleEdgeInteraction(nearestEdge);
+            } else {
+                const nearestNode = mapManager.findNearestNode(latlng.lat, latlng.lng);
+                if (nearestNode) {
+                    handleNodeInteraction(nearestNode);
+                }
+            }
+        }
+    };
+
+    function handleNodeInteraction(node) {
+        switch (mapManager.activeTool) {
+            case 'start':
+                mapManager.setStartNode(node.id);
+                showBanner(`🔵 Start set to: ${node.name}. Now set a destination or run Dijkstra.`, 'success');
+                if (mapManager.endNodeId) {
+                    calculateAndRenderRoute();
+                }
+                break;
+
+            case 'end':
+                mapManager.setEndNode(node.id);
+                showBanner(`🟣 Destination set to: ${node.name}. Calculating optimal route...`, 'success');
+                if (mapManager.startNodeId) {
+                    calculateAndRenderRoute();
+                }
+                break;
+
+            case 'traffic-light':
+                const result = trafficManager.toggleTrafficLightAtNode(node.id);
+                mapManager.renderGraphLayers();
+                if (result.action === 'added') {
+                    showBanner(`🚦 Added Traffic Light at ${node.name} (Alternates 1.5 ↔ 4.0 cost every 3s).`, 'info');
+                } else {
+                    showBanner(`🚦 Removed Traffic Light from ${node.name}.`, 'info');
+                }
+                if (mapManager.startNodeId && mapManager.endNodeId) {
+                    calculateAndRenderRoute();
+                }
+                break;
+
+            case 'wall':
+                node.isBlocked = !node.isBlocked;
+                mapManager.renderGraphLayers();
+                showBanner(`🧱 ${node.isBlocked ? 'Blocked' : 'Unblocked'} intersection: ${node.name} (Cost: ${node.isBlocked ? '∞' : '1.0'}).`, 'warning');
+                if (mapManager.startNodeId && mapManager.endNodeId) {
+                    calculateAndRenderRoute();
+                }
+                break;
+
+            case 'select':
+            default:
+                showBanner(`📍 Intersection: <b>${node.name}</b> (Type: ${node.type}, Blocked: ${node.isBlocked})`, 'info');
+                break;
+        }
+        updateStatisticsPanel();
+    }
+
+    function handleEdgeInteraction(edge) {
+        const u = graph.nodes.get(edge.source);
+        const v = graph.nodes.get(edge.target);
+        const roadName = `${u.name} ↔ ${v.name}`;
+
+        switch (mapManager.activeTool) {
+            case 'wall':
+                // Toggle blocked state for both directions
+                edge.isBlocked = !edge.isBlocked;
+                const revEdge = graph.edges.get(`${edge.target}--${edge.source}`);
+                if (revEdge) revEdge.isBlocked = edge.isBlocked;
+
+                mapManager.renderGraphLayers();
+                showBanner(`🧱 ${edge.isBlocked ? 'Blocked' : 'Unblocked'} road: ${roadName} (Cost = ${edge.isBlocked ? '∞' : 'Normal'}).`, 'warning');
+                if (mapManager.startNodeId && mapManager.endNodeId) {
+                    calculateAndRenderRoute();
+                }
+                break;
+
+            case 'shortcut':
+                // Toggle shortcut state
+                edge.roadType = edge.roadType === 'shortcut' ? 'normal' : 'shortcut';
+                const revShortcut = graph.edges.get(`${edge.target}--${edge.source}`);
+                if (revShortcut) revShortcut.roadType = edge.roadType;
+
+                mapManager.renderGraphLayers();
+                showBanner(`🟢 ${edge.roadType === 'shortcut' ? 'Created Express Shortcut (0.5x cost)' : 'Restored Normal Road (1.0x cost)'}: ${roadName}.`, 'success');
+                if (mapManager.startNodeId && mapManager.endNodeId) {
+                    calculateAndRenderRoute();
+                }
+                break;
+
+            case 'select':
+            default:
+                showBanner(`🛣️ Road: <b>${roadName}</b> | Distance: ${edge.distance} km | Type: ${edge.roadType} | Blocked: ${edge.isBlocked}`, 'info');
+                break;
+        }
+        updateStatisticsPanel();
+    }
+
+    // 6. Dijkstra Route Calculation
+    function calculateAndRenderRoute(recordSteps = false) {
+        if (!mapManager.startNodeId || !mapManager.endNodeId) {
+            showBanner('⚠️ Please select both a Start and Destination node.', 'warning');
+            return null;
+        }
+
+        updateStatusBadge('CALCULATING', 'badge-calculating');
+
+        const result = DijkstraSolver.findShortestPath(
+            graph,
+            mapManager.startNodeId,
+            mapManager.endNodeId,
+            recordSteps
+        );
+
+        currentRouteResult = result;
+
+        if (result.success) {
+            updateStatusBadge('COMPLETE', 'badge-complete');
+            mapManager.drawShortestPath(result.pathNodes);
+            showBanner(`✅ Optimal path found! Cost: <b>${result.totalCost}</b>, Distance: <b>${result.totalDistanceKm} km</b>, Nodes: <b>${result.stepCount}</b>.`, 'success');
+        } else {
+            updateStatusBadge('NO ROUTE', 'badge-no-route');
+            mapManager.clearRoute();
+            showBanner(`⚠️ ${result.error}`, 'error');
+            if (vehicle.isPlaying) {
+                vehicle.reset();
+            }
+        }
+
+        updateStatisticsPanel(result);
+        return result;
+    }
+
+    // Dynamic rerouting triggered on traffic cycle
+    function handleDynamicRecalculate() {
+        if (!mapManager.startNodeId || !mapManager.endNodeId) return;
+
+        const previousCost = currentRouteResult?.totalCost;
+        const result = DijkstraSolver.findShortestPath(graph, mapManager.startNodeId, mapManager.endNodeId);
+
+        if (result.success) {
+            // Check if path or cost changed
+            const pathChanged = !currentRouteResult || 
+                JSON.stringify(result.pathNodeIds) !== JSON.stringify(currentRouteResult.pathNodeIds);
+
+            if (pathChanged || result.totalCost !== previousCost) {
+                currentRouteResult = result;
+                mapManager.drawShortestPath(result.pathNodes);
+                updateStatisticsPanel(result);
+                updateStatusBadge('COMPLETE', 'badge-complete');
+
+                if (pathChanged) {
+                    showBanner(`⚡ Traffic changed! Dijkstra recalculated a cheaper alternative route (Cost: ${result.totalCost}).`, 'info');
+                    // Intelligently adapt vehicle
+                    if (vehicle.isPlaying) {
+                        vehicle.updatePath(result.pathNodes);
+                    }
+                }
+            }
+        } else {
+            currentRouteResult = result;
+            mapManager.clearRoute();
+            updateStatisticsPanel(result);
+            updateStatusBadge('NO ROUTE', 'badge-no-route');
+        }
+    }
+
+    // 7. Step-by-Step Algorithm Visualizer Mode
+    async function runAlgorithmVisualization() {
+        if (!mapManager.startNodeId || !mapManager.endNodeId) {
+            showBanner('⚠️ Please select both a Start and Destination node first.', 'warning');
+            return;
+        }
+
+        if (isVisualizingAlgorithm) {
+            // Abort ongoing visualization
+            if (visualizationAbortController) {
+                visualizationAbortController.abort = true;
+            }
+            return;
+        }
+
+        isVisualizingAlgorithm = true;
+        visualizationAbortController = { abort: false };
+
+        mapManager.clearRoute();
+        mapManager.clearAlgorithmViz();
+        updateStatusBadge('EXPLORING', 'badge-calculating');
+
+        // Open log panel
+        elements.algoLogPanel.classList.remove('hidden');
+        elements.algoLogContent.innerHTML = '<div class="log-entry log-info">Starting Dijkstra step-by-step exploration...</div>';
+
+        const result = DijkstraSolver.findShortestPath(graph, mapManager.startNodeId, mapManager.endNodeId, true);
+        const steps = result.steps || [];
+
+        for (let i = 0; i < steps.length; i++) {
+            if (visualizationAbortController.abort) break;
+
+            const step = steps[i];
+            const logItem = document.createElement('div');
+            logItem.className = 'log-entry';
+
+            switch (step.type) {
+                case 'visit_node':
+                    mapManager.highlightExplorationNode(step.nodeId, 'visited');
+                    logItem.classList.add('log-visit');
+                    logItem.innerHTML = `<span>[Step ${i+1}]</span> <b>Visited:</b> ${step.description}`;
+                    break;
+
+                case 'relax_edge':
+                    mapManager.highlightExplorationNode(step.targetId, 'evaluating');
+                    logItem.classList.add('log-relax');
+                    logItem.innerHTML = `<span>[Step ${i+1}]</span> <b>Edge Relaxed:</b> ${step.description}`;
+                    break;
+
+                case 'blocked_edge':
+                    logItem.classList.add('log-blocked');
+                    logItem.innerHTML = `<span>[Step ${i+1}]</span> <b>Blocked:</b> ${step.description}`;
+                    break;
+
+                case 'reached_destination':
+                    logItem.classList.add('log-success');
+                    logItem.innerHTML = `<span>[Step ${i+1}]</span> <b>Destination Reached:</b> ${step.description}`;
+                    break;
+
+                default:
+                    logItem.classList.add('log-info');
+                    logItem.innerHTML = `<span>[Step ${i+1}]</span> ${step.description}`;
+            }
+
+            elements.algoLogContent.appendChild(logItem);
+            elements.algoLogContent.scrollTop = elements.algoLogContent.scrollHeight;
+
+            // Small delay for smooth visual pacing
+            await new Promise(r => setTimeout(r, 180));
+        }
+
+        isVisualizingAlgorithm = false;
+
+        if (!visualizationAbortController.abort && result.success) {
+            mapManager.clearAlgorithmViz();
+            mapManager.drawShortestPath(result.pathNodes);
+            updateStatusBadge('COMPLETE', 'badge-complete');
+            updateStatisticsPanel(result);
+            showBanner(`🎉 Visualization Complete! Optimal Shortest Path formed (Cost: ${result.totalCost}).`, 'success');
+        } else if (!result.success) {
+            updateStatusBadge('NO ROUTE', 'badge-no-route');
+            showBanner(`⚠️ Exploration concluded: No valid route found.`, 'error');
+        }
+    }
+
+    // 8. Vehicle Animation Controls
+    elements.btnVehiclePlay.addEventListener('click', () => {
+        if (!currentRouteResult || !currentRouteResult.success || !currentRouteResult.pathNodes) {
+            showBanner('⚠️ Please calculate a valid route before animating the vehicle.', 'warning');
+            return;
+        }
+
+        if (vehicle.isPaused) {
+            vehicle.resume();
+            showBanner('🚗 Vehicle animation resumed.', 'info');
+        } else {
+            vehicle.setSpeed(parseFloat(elements.vehicleSpeedSelect.value));
+            vehicle.start(
+                currentRouteResult.pathNodes,
+                () => {
+                    showBanner('🎉 Vehicle reached destination safely!', 'success');
+                },
+                (progress) => {
+                    // Update step in status if needed
+                }
+            );
+            showBanner('🚗 Vehicle en route to destination...', 'info');
+        }
+    });
+
+    elements.btnVehiclePause.addEventListener('click', () => {
+        if (vehicle.isPlaying && !vehicle.isPaused) {
+            vehicle.pause();
+            showBanner('⏸️ Vehicle animation paused.', 'info');
+        }
+    });
+
+    elements.btnVehicleReset.addEventListener('click', () => {
+        vehicle.reset();
+        showBanner('⏹️ Vehicle animation reset.', 'info');
+    });
+
+    elements.vehicleSpeedSelect.addEventListener('change', (e) => {
+        vehicle.setSpeed(parseFloat(e.target.value));
+    });
+
+    // 9. Toolbar Action Listeners
+    elements.btnRunDijkstra.addEventListener('click', () => {
+        calculateAndRenderRoute();
+    });
+
+    elements.btnVisualizeAlgo.addEventListener('click', () => {
+        runAlgorithmVisualization();
+    });
+
+    elements.btnClearRoute.addEventListener('click', () => {
+        mapManager.clearRoute();
+        vehicle.reset();
+        currentRouteResult = null;
+        updateStatusBadge('READY', 'badge-ready');
+        updateStatisticsPanel();
+        showBanner('🧹 Route cleared. Map network remains configured.', 'info');
+    });
+
+    elements.btnResetMap.addEventListener('click', () => {
+        if (isVisualizingAlgorithm && visualizationAbortController) {
+            visualizationAbortController.abort = true;
+        }
+        vehicle.reset();
+        mapManager.reset();
+        currentRouteResult = null;
+        elements.algoLogPanel.classList.add('hidden');
+        updateStatusBadge('READY', 'badge-ready');
+        updateStatisticsPanel();
+        showBanner('🔄 Map completely reset to default state.', 'info');
+    });
+
+    // 10. Toggles
+    elements.toggleGraph.addEventListener('change', (e) => {
+        mapManager.toggleGraphOverlay(e.target.checked);
+        showBanner(`🕸️ Graph overlay ${e.target.checked ? 'Enabled' : 'Disabled'}.`, 'info');
+    });
+
+    elements.toggleAutoTraffic.addEventListener('change', (e) => {
+        isAutoTrafficEnabled = e.target.checked;
+        if (isAutoTrafficEnabled) {
+            trafficManager.start();
+            showBanner('⏱️ 3-second automatic traffic cycling active.', 'info');
+        } else {
+            trafficManager.stop();
+            showBanner('⏸️ Automatic traffic cycling paused.', 'info');
+        }
+    });
+
+    elements.btnCloseAlgoLog.addEventListener('click', () => {
+        elements.algoLogPanel.classList.add('hidden');
+    });
+
+    // 11. Statistics & UI Helper Functions
+    function updateStatisticsPanel(result = currentRouteResult) {
+        const startNode = mapManager.startNodeId ? graph.nodes.get(mapManager.startNodeId) : null;
+        const endNode = mapManager.endNodeId ? graph.nodes.get(mapManager.endNodeId) : null;
+
+        elements.statStartLoc.textContent = startNode ? `${startNode.name} (${startNode.lat.toFixed(3)}, ${startNode.lng.toFixed(3)})` : 'None Selected';
+        elements.statEndLoc.textContent = endNode ? `${endNode.name} (${endNode.lat.toFixed(3)}, ${endNode.lng.toFixed(3)})` : 'None Selected';
+
+        let obstacleCount = 0;
+        for (const [, n] of graph.nodes) { if (n.isBlocked) obstacleCount++; }
+        for (const [, e] of graph.edges) { if (e.isBlocked) obstacleCount += 0.5; }
+        elements.statObstacles.textContent = Math.floor(obstacleCount);
+
+        if (result && result.success) {
+            elements.statWeightedCost.textContent = result.totalCost.toFixed(2);
+            elements.statDistance.textContent = `${result.totalDistanceKm} km`;
+            elements.statSteps.textContent = result.stepCount;
+            elements.statTrafficLights.textContent = result.trafficLightsCount;
+            elements.statShortcuts.textContent = result.shortcutsCount;
+            elements.statExecTime.textContent = `${result.calculationTimeMs} ms`;
+        } else if (result && result.noRoute) {
+            elements.statWeightedCost.textContent = '∞';
+            elements.statDistance.textContent = 'N/A';
+            elements.statSteps.textContent = '0';
+            elements.statTrafficLights.textContent = '0';
+            elements.statShortcuts.textContent = '0';
+            elements.statExecTime.textContent = `${result.calculationTimeMs || 0} ms`;
+        } else {
+            elements.statWeightedCost.textContent = '--';
+            elements.statDistance.textContent = '--';
+            elements.statSteps.textContent = '--';
+            elements.statTrafficLights.textContent = '--';
+            elements.statShortcuts.textContent = '--';
+            elements.statExecTime.textContent = '--';
+        }
+    }
+
+    function updateStatusBadge(text, className) {
+        elements.routeStatusBadge.textContent = text;
+        elements.routeStatusBadge.className = `status-badge ${className}`;
+    }
+
+    function showBanner(message, type = 'info') {
+        elements.infoBanner.innerHTML = message;
+        elements.infoBanner.className = `info-banner banner-${type}`;
+    }
+
+    // Set initial tool
+    setActiveTool('start');
+    updateStatisticsPanel();
 });
-
-document.getElementById('resetMap').addEventListener('click', resetGrid);
-
-// Initialize everything on load
-initGrid();
-addHurdles();
-blinkTrafficLights();

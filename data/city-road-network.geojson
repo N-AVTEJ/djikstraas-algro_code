@@ -1,0 +1,629 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "city": "Hyderabad, India",
+    "district": "Central Hussain Sagar, Secretariat, Begumpet & Khairatabad Corridor",
+    "projection": "EPSG:4326",
+    "costModel": {
+      "normal": 1.0,
+      "shortcut": 0.5,
+      "trafficLightYellow": 1.5,
+      "trafficLightRed": 4.0,
+      "blocked": "Infinity"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4633, 17.4042] },
+      "properties": {
+        "id": "lakdikapul",
+        "name": "Lakdikapul Junction",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4716, 17.3921] },
+      "properties": {
+        "id": "nampally",
+        "name": "Nampally Station",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4611, 17.4116] },
+      "properties": {
+        "id": "khairatabad",
+        "name": "Khairatabad Junction",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4635, 17.4150] },
+      "properties": {
+        "id": "necklace_south",
+        "name": "Necklace Road (South / IMAX Gate)",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4715, 17.4128] },
+      "properties": {
+        "id": "secretariat",
+        "name": "BR Ambedkar Telangana Secretariat",
+        "type": "intersection",
+        "trafficLight": true,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4740, 17.4140] },
+      "properties": {
+        "id": "tankbund_south",
+        "name": "Tank Bund South (Lumbini Park)",
+        "type": "intersection",
+        "trafficLight": true,
+        "trafficState": "red",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4760, 17.4150] },
+      "properties": {
+        "id": "lower_tankbund",
+        "name": "Lower Tank Bund Entry",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4585, 17.4190] },
+      "properties": {
+        "id": "raj_bhavan",
+        "name": "Raj Bhavan Road",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4560, 17.4255] },
+      "properties": {
+        "id": "somajiguda",
+        "name": "Somajiguda Circle",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4526, 17.4284] },
+      "properties": {
+        "id": "punjagutta",
+        "name": "Punjagutta Central Circle",
+        "type": "intersection",
+        "trafficLight": true,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4483, 17.4375] },
+      "properties": {
+        "id": "ameerpet",
+        "name": "Ameerpet Crossroads",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4645, 17.4265] },
+      "properties": {
+        "id": "necklace_mid",
+        "name": "PVNR Marg (People's Plaza)",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4675, 17.4320] },
+      "properties": {
+        "id": "jalavihar",
+        "name": "Jalavihar Promenade",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4720, 17.4350] },
+      "properties": {
+        "id": "sanjeevaiah",
+        "name": "Sanjeevaiah Park Station",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4782, 17.4230] },
+      "properties": {
+        "id": "tankbund_mid",
+        "name": "Tank Bund Promenade (Buddha View)",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4830, 17.4350] },
+      "properties": {
+        "id": "ranigunj",
+        "name": "Ranigunj / Tank Bund North",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4830, 17.4220] },
+      "properties": {
+        "id": "kavadiguda",
+        "name": "Kavadiguda Crossroads",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4660, 17.4415] },
+      "properties": {
+        "id": "begumpet",
+        "name": "Begumpet Flyover Junction",
+        "type": "intersection",
+        "trafficLight": true,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4770, 17.4410] },
+      "properties": {
+        "id": "minister_road",
+        "name": "Minister Road Junction",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [78.4872, 17.4418] },
+      "properties": {
+        "id": "paradise",
+        "name": "Paradise Circle",
+        "type": "intersection",
+        "trafficLight": false,
+        "trafficState": "yellow",
+        "blocked": false
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4633, 17.4042],
+        [78.4622, 17.4080],
+        [78.4611, 17.4116]
+      ]},
+      "properties": {
+        "id": "lakdikapul--khairatabad",
+        "from": "lakdikapul",
+        "to": "khairatabad",
+        "name": "Khairatabad Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4633, 17.4042],
+        [78.4670, 17.3980],
+        [78.4716, 17.3921]
+      ]},
+      "properties": {
+        "id": "lakdikapul--nampally",
+        "from": "lakdikapul",
+        "to": "nampally",
+        "name": "Nampally Station Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4611, 17.4116],
+        [78.4622, 17.4135],
+        [78.4635, 17.4150]
+      ]},
+      "properties": {
+        "id": "khairatabad--necklace_south",
+        "from": "khairatabad",
+        "to": "necklace_south",
+        "name": "IMAX Link Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4611, 17.4116],
+        [78.4650, 17.4122],
+        [78.4685, 17.4125],
+        [78.4715, 17.4128]
+      ]},
+      "properties": {
+        "id": "khairatabad--secretariat",
+        "from": "khairatabad",
+        "to": "secretariat",
+        "name": "NTR Marg (Lakeside Boulevard)",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4611, 17.4116],
+        [78.4600, 17.4150],
+        [78.4585, 17.4190]
+      ]},
+      "properties": {
+        "id": "khairatabad--raj_bhavan",
+        "from": "khairatabad",
+        "to": "raj_bhavan",
+        "name": "Raj Bhavan Road South",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4585, 17.4190],
+        [78.4572, 17.4220],
+        [78.4560, 17.4255]
+      ]},
+      "properties": {
+        "id": "raj_bhavan--somajiguda",
+        "from": "raj_bhavan",
+        "to": "somajiguda",
+        "name": "Raj Bhavan Road North",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4560, 17.4255],
+        [78.4542, 17.4270],
+        [78.4526, 17.4284]
+      ]},
+      "properties": {
+        "id": "somajiguda--punjagutta",
+        "from": "somajiguda",
+        "to": "punjagutta",
+        "name": "Punjagutta Main Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4526, 17.4284],
+        [78.4505, 17.4330],
+        [78.4483, 17.4375]
+      ]},
+      "properties": {
+        "id": "punjagutta--ameerpet",
+        "from": "punjagutta",
+        "to": "ameerpet",
+        "name": "Ameerpet Metro Corridor",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4560, 17.4255],
+        [78.4600, 17.4320],
+        [78.4635, 17.4375],
+        [78.4660, 17.4415]
+      ]},
+      "properties": {
+        "id": "somajiguda--begumpet",
+        "from": "somajiguda",
+        "to": "begumpet",
+        "name": "Begumpet Main Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4635, 17.4150],
+        [78.4638, 17.4190],
+        [78.4642, 17.4230],
+        [78.4645, 17.4265]
+      ]},
+      "properties": {
+        "id": "necklace_south--necklace_mid",
+        "from": "necklace_south",
+        "to": "necklace_mid",
+        "name": "PVNR Marg (Lakefront South)",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4645, 17.4265],
+        [78.4655, 17.4290],
+        [78.4675, 17.4320]
+      ]},
+      "properties": {
+        "id": "necklace_mid--jalavihar",
+        "from": "necklace_mid",
+        "to": "jalavihar",
+        "name": "PVNR Marg (Mid Lake Arc)",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4675, 17.4320],
+        [78.4695, 17.4338],
+        [78.4720, 17.4350]
+      ]},
+      "properties": {
+        "id": "jalavihar--sanjeevaiah",
+        "from": "jalavihar",
+        "to": "sanjeevaiah",
+        "name": "PVNR Marg (North Lakefront)",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4720, 17.4350],
+        [78.4745, 17.4380],
+        [78.4770, 17.4410]
+      ]},
+      "properties": {
+        "id": "sanjeevaiah--minister_road",
+        "from": "sanjeevaiah",
+        "to": "minister_road",
+        "name": "Minister Road Link",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4720, 17.4350],
+        [78.4760, 17.4348],
+        [78.4800, 17.4350],
+        [78.4830, 17.4350]
+      ]},
+      "properties": {
+        "id": "sanjeevaiah--ranigunj",
+        "from": "sanjeevaiah",
+        "to": "ranigunj",
+        "name": "Sanjeevaiah to Ranigunj Link",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4715, 17.4128],
+        [78.4728, 17.4135],
+        [78.4740, 17.4140]
+      ]},
+      "properties": {
+        "id": "secretariat--tankbund_south",
+        "from": "secretariat",
+        "to": "tankbund_south",
+        "name": "Lumbini Access Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4740, 17.4140],
+        [78.4760, 17.4180],
+        [78.4782, 17.4230]
+      ]},
+      "properties": {
+        "id": "tankbund_south--tankbund_mid",
+        "from": "tankbund_south",
+        "to": "tankbund_mid",
+        "name": "Tank Bund Road South",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4782, 17.4230],
+        [78.4805, 17.4290],
+        [78.4830, 17.4350]
+      ]},
+      "properties": {
+        "id": "tankbund_mid--ranigunj",
+        "from": "tankbund_mid",
+        "to": "ranigunj",
+        "name": "Tank Bund Road North",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4715, 17.4128],
+        [78.4740, 17.4135],
+        [78.4760, 17.4150]
+      ]},
+      "properties": {
+        "id": "secretariat--lower_tankbund",
+        "from": "secretariat",
+        "to": "lower_tankbund",
+        "name": "Telugu Thalli Flyover Entry",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4760, 17.4150],
+        [78.4795, 17.4185],
+        [78.4830, 17.4220]
+      ]},
+      "properties": {
+        "id": "lower_tankbund--kavadiguda",
+        "from": "lower_tankbund",
+        "to": "kavadiguda",
+        "name": "Lower Tank Bund Road",
+        "roadType": "shortcut",
+        "baseCost": 0.5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4830, 17.4220],
+        [78.4830, 17.4285],
+        [78.4830, 17.4350]
+      ]},
+      "properties": {
+        "id": "kavadiguda--ranigunj",
+        "from": "kavadiguda",
+        "to": "ranigunj",
+        "name": "Kavadiguda Arterial",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4660, 17.4415],
+        [78.4715, 17.4412],
+        [78.4770, 17.4410]
+      ]},
+      "properties": {
+        "id": "begumpet--minister_road",
+        "from": "begumpet",
+        "to": "minister_road",
+        "name": "Begumpet Airport Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4770, 17.4410],
+        [78.4820, 17.4414],
+        [78.4872, 17.4418]
+      ]},
+      "properties": {
+        "id": "minister_road--paradise",
+        "from": "minister_road",
+        "to": "paradise",
+        "name": "MG Road / Paradise Corridor",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [
+        [78.4830, 17.4350],
+        [78.4851, 17.4385],
+        [78.4872, 17.4418]
+      ]},
+      "properties": {
+        "id": "ranigunj--paradise",
+        "from": "ranigunj",
+        "to": "paradise",
+        "name": "Bible House / RP Road",
+        "roadType": "normal",
+        "baseCost": 1.0
+      }
+    }
+  ]
+}

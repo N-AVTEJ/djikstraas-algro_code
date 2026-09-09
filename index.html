@@ -3,76 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive City Navigation & Dijkstra Algorithm Visualizer</title>
-    <meta name="description" content="Visual Dijkstra's algorithm simulator with dynamic traffic conditions and real-time Leaflet mapping.">
-    
-    <!-- Google Fonts -->
+    <title>CityNav Simulator — Road-Based Dijkstra & Traffic Engine</title>
+    <meta name="description" content="Realistic road-aligned city navigation simulator and Dijkstra algorithm visualizer in Hyderabad, India with dynamic traffic signals and smooth vehicle animation.">
+
+    <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
     <!-- Leaflet 1.9.4 Official CDN CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    
-    <!-- Custom Application Styles -->
+
+    <!-- Custom Production Styles -->
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <!-- Top Application Header -->
     <header class="app-header">
         <div class="brand-section">
-            <span class="brand-icon">⚡</span>
+            <div class="brand-badge">🚗</div>
             <div>
-                <h1 class="brand-title">CityNav & Dijkstra Visualizer</h1>
-                <p class="brand-subtitle">Dynamic Weighted Shortest Path Traversal • Hyderabad Network</p>
+                <h1 class="brand-title">CityNav Simulator <span class="badge-sub">Dijkstra Engine</span></h1>
+                <p class="brand-subtitle">Realistic Road-Based Navigation • Central Hyderabad Network</p>
             </div>
         </div>
-        <div class="header-status">
-            <span id="routeStatusBadge" class="status-badge badge-ready">READY</span>
+
+        <div class="header-actions">
+            <button id="btnDemoMode" class="btn btn-demo" title="Load predefined college presentation scenario">🌟 Demo Mode</button>
+            <button id="btnToggleExplainer" class="btn btn-secondary" title="View algorithmic cost breakdown">📖 How Dijkstra Works</button>
+            <button id="btnAbout" class="btn btn-secondary" title="About architecture & technologies">ℹ️ About</button>
+            <span id="routeStatusBadge" class="status-badge badge-idle">READY</span>
         </div>
     </header>
 
-    <!-- Interactive Navigation Toolbar -->
+    <!-- Navigation & Placement Toolbar -->
     <nav class="toolbar-section">
-        <!-- Placement & Interaction Tools -->
+        <!-- Snapping & Placement Tools -->
         <div class="tool-group">
             <span class="group-label">Tools:</span>
-            <button id="toolSelect" class="btn tool-btn" data-tool="select" title="Inspect intersections and roads">🔍 Select</button>
-            <button id="toolStart" class="btn tool-btn active" data-tool="start" title="Place Origin (Blue)">🔵 Start</button>
-            <button id="toolEnd" class="btn tool-btn" data-tool="end" title="Place Destination (Purple)">🟣 End</button>
-            <button id="toolWall" class="btn tool-btn" data-tool="wall" title="Block road / intersection (Weight: ∞)">🧱 Wall</button>
-            <button id="toolTrafficLight" class="btn tool-btn" data-tool="traffic-light" title="Toggle traffic light (Yellow 1.5 ↔ Red 4.0)">🚦 Traffic Light</button>
-            <button id="toolShortcut" class="btn tool-btn" data-tool="shortcut" title="Create Express Shortcut (Weight: 0.5x)">🟢 Shortcut</button>
+            <button id="toolStart" class="btn tool-btn active" data-tool="start" title="Snap Origin to nearest road">🔵 Set Start</button>
+            <button id="toolEnd" class="btn tool-btn" data-tool="end" title="Snap Destination to nearest road">🟣 Set Destination</button>
+            <button id="toolTrafficLight" class="btn tool-btn" data-tool="traffic-light" title="Toggle traffic light on intersection">🚦 Traffic Light</button>
+            <button id="toolShortcut" class="btn tool-btn" data-tool="shortcut" title="Toggle Express Shortcut (0.5x cost)">🟢 Shortcut</button>
+            <button id="toolBlock" class="btn tool-btn" data-tool="block" title="Block road segment (Weight: ∞)">🧱 Block Road</button>
+            <button id="toolSelect" class="btn tool-btn" data-tool="select" title="Inspect road and intersection metadata">🔍 Inspect</button>
         </div>
 
         <div class="toolbar-divider"></div>
 
-        <!-- Algorithm Actions -->
+        <!-- Algorithm & View Controls -->
         <div class="tool-group">
             <button id="btnRunDijkstra" class="btn btn-run" title="Calculate shortest weighted path immediately">⚡ Run Dijkstra</button>
-            <button id="btnVisualizeAlgo" class="btn btn-primary" title="Step-by-step animated Dijkstra exploration">👁️ Visualize Algorithm</button>
-            <button id="btnClearRoute" class="btn" title="Clear current calculated route">🧹 Clear Route</button>
-            <button id="btnResetMap" class="btn btn-reset" title="Reset everything to initial state">🔄 Reset</button>
+            <button id="btnVisualizeDijkstra" class="btn btn-viz" title="Step-by-step exploration animation">👁️ Visualize Dijkstra</button>
+            <button id="btnFitRoute" class="btn" title="Fit map viewport to complete route">🎯 Fit Route</button>
+            <button id="btnClearRoute" class="btn" title="Clear current route">🧹 Clear Route</button>
+            <button id="btnReset" class="btn btn-reset" title="Reset all obstacles, shortcuts, and markers">🔄 Reset</button>
         </div>
 
         <div class="toolbar-divider"></div>
 
-        <!-- Overlay Toggles -->
+        <!-- Toggles -->
         <div class="tool-group">
-            <label class="toggle-switch-label" title="Show or hide graph nodes & edges">
+            <label class="toggle-switch-label" title="Show or hide graph nodes overlay">
                 <input type="checkbox" id="toggleGraphOverlay" checked>
                 <span>Show Graph</span>
             </label>
-            <label class="toggle-switch-label" title="Automatic 3-second traffic light cycling">
+            <label class="toggle-switch-label" title="Automated 3-second traffic light cycle">
                 <input type="checkbox" id="toggleAutoTraffic" checked>
                 <span>Auto-Traffic (3s)</span>
             </label>
         </div>
     </nav>
 
-    <!-- Information & Guidance Banner -->
+    <!-- Interactive Guidance Banner -->
     <div id="infoBanner" class="info-banner banner-info">
-        🔵 Set Start Tool: Click any intersection on the map to place the origin point.
+        🔵 <b>Set Start Tool:</b> Click on or near any road to snap the origin point.
     </div>
 
     <!-- Main Viewport Layout -->
@@ -97,16 +102,20 @@
                     <div id="statEndLoc" class="card-value">None Selected</div>
                 </div>
                 <div class="telemetry-card">
-                    <div class="card-label">Weighted Cost</div>
-                    <div id="statWeightedCost" class="card-value cost-val">--</div>
+                    <div class="card-label">Road Distance</div>
+                    <div id="statDistance" class="card-value highlight-val">--</div>
                 </div>
                 <div class="telemetry-card">
-                    <div class="card-label">Road Distance</div>
-                    <div id="statDistance" class="card-value">--</div>
+                    <div class="card-label">Weighted Cost</div>
+                    <div id="statCost" class="card-value cost-val">--</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="card-label">Graph Nodes</div>
+                    <div id="statGraphNodes" class="card-value">--</div>
                 </div>
                 <div class="telemetry-card">
                     <div class="card-label">Path Nodes</div>
-                    <div id="statSteps" class="card-value">--</div>
+                    <div id="statPathNodes" class="card-value">--</div>
                 </div>
                 <div class="telemetry-card">
                     <div class="card-label">Traffic Lights</div>
@@ -117,93 +126,163 @@
                     <div id="statShortcuts" class="card-value">--</div>
                 </div>
                 <div class="telemetry-card">
-                    <div class="card-label">Active Obstacles</div>
-                    <div id="statObstacles" class="card-value">0</div>
+                    <div class="card-label">Blocked Roads</div>
+                    <div id="statBlockedRoads" class="card-value">0</div>
                 </div>
-                <div class="telemetry-card full-width">
-                    <div class="card-label">Dijkstra Calc Time</div>
-                    <div id="statExecTime" class="card-value">--</div>
+                <div class="telemetry-card">
+                    <div class="card-label">Calc Time</div>
+                    <div id="statCalcTime" class="card-value">--</div>
                 </div>
             </div>
         </aside>
 
         <!-- Floating HUD: Vehicle Controls -->
         <section class="hud-panel vehicle-panel">
-            <span class="panel-title">🚗 Vehicle:</span>
-            <button id="btnVehiclePlay" class="btn btn-primary" title="Animate vehicle along route">▶️ Animate</button>
-            <button id="btnVehiclePause" class="btn" title="Pause vehicle animation">⏸️ Pause</button>
-            <button id="btnVehicleReset" class="btn" title="Reset vehicle position">⏹️ Reset</button>
-            <select id="vehicleSpeedSelect" class="speed-select" title="Animation Speed">
-                <option value="0.5">0.5x Speed</option>
-                <option value="1.0" selected>1.0x Speed</option>
-                <option value="2.0">2.0x Speed</option>
-                <option value="3.0">3.0x Speed</option>
-            </select>
+            <div class="vehicle-panel-header">
+                <span class="panel-title">🚗 Vehicle Simulation</span>
+            </div>
+            <div class="vehicle-controls-row">
+                <button id="btnVehiclePlay" class="btn btn-primary btn-sm" title="Animate vehicle along road geometry">▶️ Animate</button>
+                <button id="btnVehiclePause" class="btn btn-sm" title="Pause simulation">⏸️ Pause</button>
+                <button id="btnVehicleReset" class="btn btn-sm" title="Reset to start">⏹️ Reset</button>
+                <select id="vehicleSpeedSelect" class="speed-select" title="Animation speed multiplier">
+                    <option value="0.5">0.5x Speed</option>
+                    <option value="1.0" selected>1.0x Speed</option>
+                    <option value="2.0">2.0x Speed</option>
+                    <option value="3.0">3.0x Speed</option>
+                </select>
+                <label class="follow-vehicle-label" title="Smoothly pan map following the vehicle">
+                    <input type="checkbox" id="checkFollowVehicle">
+                    <span>Follow Car</span>
+                </label>
+            </div>
         </section>
 
         <!-- Floating HUD: Legend -->
         <aside class="hud-panel legend-panel">
             <div class="panel-header">
-                <span class="panel-title">🗺️ Map Legend</span>
+                <span class="panel-title">🗺️ Map Legend & Weights</span>
             </div>
             <ul class="legend-list">
                 <li class="legend-item">
-                    <span class="legend-name">🛣️ Normal Road</span>
-                    <span class="legend-cost cost-normal">1.0x</span>
+                    <span class="legend-name"><span class="legend-swatch road-normal"></span> Normal Road</span>
+                    <span class="legend-cost">1.0x</span>
                 </li>
                 <li class="legend-item">
-                    <span class="legend-name">🟢 Shortcut</span>
+                    <span class="legend-name"><span class="legend-swatch road-shortcut"></span> Express Shortcut</span>
                     <span class="legend-cost cost-shortcut">0.5x</span>
                 </li>
                 <li class="legend-item">
-                    <span class="legend-name">🟡 Yellow Light</span>
-                    <span class="legend-cost cost-yellow">+1.5</span>
+                    <span class="legend-name"><span class="legend-swatch light-yellow"></span> Yellow Signal</span>
+                    <span class="legend-cost cost-yellow">+1.5 delay</span>
                 </li>
                 <li class="legend-item">
-                    <span class="legend-name">🔴 Red Light</span>
-                    <span class="legend-cost cost-red">+4.0</span>
+                    <span class="legend-name"><span class="legend-swatch light-red"></span> Red Signal</span>
+                    <span class="legend-cost cost-red">+4.0 delay</span>
                 </li>
                 <li class="legend-item">
-                    <span class="legend-name">🧱 Blocked Road</span>
-                    <span class="legend-cost cost-blocked">∞</span>
+                    <span class="legend-name"><span class="legend-swatch road-blocked"></span> Blocked Road</span>
+                    <span class="legend-cost cost-blocked">∞ (Impassable)</span>
                 </li>
                 <li class="legend-item">
-                    <span class="legend-name">🔵 Start</span>
-                    <span class="legend-cost">Origin</span>
-                </li>
-                <li class="legend-item">
-                    <span class="legend-name">🟣 Destination</span>
-                    <span class="legend-cost">Target</span>
-                </li>
-                <li class="legend-item">
-                    <span class="legend-name">✨ Optimal Route</span>
-                    <span class="legend-cost cost-shortcut">Dijkstra</span>
-                </li>
-                <li class="legend-item">
-                    <span class="legend-name">🚗 Vehicle</span>
-                    <span class="legend-cost">Simulation</span>
+                    <span class="legend-name"><span class="legend-swatch route-optimal"></span> Optimal Route</span>
+                    <span class="legend-cost">Dijkstra Min</span>
                 </li>
             </ul>
         </aside>
 
-        <!-- Algorithm Step-by-Step Log Drawer -->
-        <div id="algoLogPanel" class="algo-log-panel hidden">
-            <div class="panel-header" style="padding: 8px 12px; margin-bottom: 0;">
-                <span class="panel-title">🧠 Dijkstra Exploration Log</span>
-                <button id="btnCloseAlgoLog" class="btn-close-log" title="Close log">✕</button>
+        <!-- Collapsible Educational Drawer: How Dijkstra Works -->
+        <div id="explainerDrawer" class="explainer-drawer">
+            <div class="drawer-header">
+                <div class="drawer-title-group">
+                    <span class="drawer-icon">🧠</span>
+                    <div>
+                        <h2 class="drawer-title">How Dijkstra's Algorithm Works</h2>
+                        <p class="drawer-subtitle">Dynamic Weighted Shortest Path Mechanics</p>
+                    </div>
+                </div>
+                <button id="btnCloseExplainer" class="btn-close" title="Close Drawer">✕</button>
             </div>
-            <div id="algoLogContent" class="algo-log-content"></div>
+            <div class="drawer-body">
+                <div class="algorithm-flow">
+                    <div class="flow-step">
+                        <div class="step-badge">1</div>
+                        <div class="step-content">
+                            <h4>Initialize Distances</h4>
+                            <p>Set tentative distance to Origin = 0. All other nodes = ∞. Insert Origin into the Min-Priority Queue (Binary Min-Heap).</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="step-badge">2</div>
+                        <div class="step-content">
+                            <h4>Greedy Selection</h4>
+                            <p>Extract unvisited node $u$ with the minimum tentative cost from the Priority Queue in $O(\log V)$ time.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="step-badge">3</div>
+                        <div class="step-content">
+                            <h4>Dynamic Edge Relaxation</h4>
+                            <p>For each outgoing road edge $(u, v)$, compute dynamic weight:</p>
+                            <div class="formula-box">
+                                $\text{Edge Cost} = \text{Distance (km)} \times \text{Road Multiplier} + \text{Traffic Delay}$
+                            </div>
+                            <ul class="cost-breakdown-list">
+                                <li>Normal Road = <code>1.0</code></li>
+                                <li>Express Shortcut = <code>0.5</code></li>
+                                <li>Yellow Traffic Light = <code>+1.5</code></li>
+                                <li>Red Traffic Light = <code>+4.0</code></li>
+                                <li>Blocked Road = <code>Infinity</code></li>
+                            </ul>
+                            <p>If $\text{dist}[u] + \text{cost}(u,v) < \text{dist}[v]$, update $\text{dist}[v]$ and record predecessor.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <div class="step-badge">4</div>
+                        <div class="step-content">
+                            <h4>Backtrack Optimal Path</h4>
+                            <p>Upon reaching the Destination, backtrack predecessors to assemble the sequence of road coordinates for Leaflet polyline rendering and smooth vehicle animation.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Modal Dialog -->
+        <div id="aboutModal" class="modal-backdrop hidden">
+            <div class="modal-dialog">
+                <div class="modal-header">
+                    <h3 class="modal-title">ℹ️ About CityNav Simulator</h3>
+                    <button id="btnCloseAbout" class="btn-close" title="Close Modal">✕</button>
+                </div>
+                <div class="modal-content">
+                    <p>This application is an educational, production-quality city navigation simulator demonstrating <b>Dijkstra's Algorithm</b> on a realistic road network in <b>Hyderabad, India</b>.</p>
+                    
+                    <h4>Architectural Separation:</h4>
+                    <ul>
+                        <li><b>Leaflet 1.9.4:</b> Used strictly for geographic map presentation, OpenStreetMap tiles, SVG markers, and polyline visualization.</li>
+                        <li><b>Custom Pure JavaScript Engine:</b> Dijkstra's Algorithm, Binary Min-Heap Priority Queue, dynamic traffic weight calculation, and road snapping are implemented manually without any external routing API (no Google, Mapbox, or OSRM).</li>
+                        <li><b>Single Source of Truth:</b> Road geometry coordinates drive both the displayed route polyline and the 60fps vehicle animation.</li>
+                    </ul>
+
+                    <h4>Dynamic Real-Time Recalculation:</h4>
+                    <p>Every 3 seconds, traffic lights cycle between Yellow (1.5) and Red (4.0). If a signal delay makes an alternative boulevard cheaper, Dijkstra reroutes dynamically and smoothly transfers the moving vehicle.</p>
+                </div>
+            </div>
         </div>
     </main>
 
     <!-- Leaflet 1.9.4 Official CDN JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-    <!-- Application Modular Scripts -->
-    <script src="dijkstra.js"></script>
-    <script src="traffic.js"></script>
-    <script src="vehicle.js"></script>
-    <script src="map.js"></script>
-    <script src="script.js"></script>
+    <!-- Application Modular Architecture Scripts -->
+    <script src="js/graph.js"></script>
+    <script src="js/dijkstra.js"></script>
+    <script src="js/traffic.js"></script>
+    <script src="js/route.js"></script>
+    <script src="js/vehicle.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>

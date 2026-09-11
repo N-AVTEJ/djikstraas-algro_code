@@ -4,12 +4,14 @@
  * ============================================================================
  *
  * Responsibilities:
- * 1. Initializes Leaflet with high-DPI OpenStreetMap tiles (CartoDB Dark Matter).
- * 2. Manages discrete Leaflet layer groups with strict visual z-index hierarchy.
- * 3. Renders road network geometry (Normal, Shortcut, Blocked).
- * 4. Renders realistic SVG Traffic Signal markers.
- * 5. Provides animated Snap-to-Road visual indicators.
- * 6. Supports "Show Graph" toggle and "Fit Route" viewport controls.
+ * 1. Initializes Leaflet with official, clean OpenStreetMap tiles.
+ *    (Zero API key watermarks, clear city roads, water bodies, and parks).
+ * 2. Natural navigation: standard mousewheel zoom, drag pan, double click.
+ * 3. Default state hides graph overlay (nodes/edges) for a clean city map.
+ * 4. Distinct Start (Green) and Destination (Red) markers with labels.
+ * 5. Visual layers for Normal Route (blue) and Dijkstra Fastest Route (emerald).
+ * 6. Visual styling for Blocked Roads (red dashed hazard) and Shortcuts.
+ * 7. 3-state SVG Traffic Signal markers (Green / Yellow / Red).
  */
 
 class LeafletMapManager {
@@ -25,7 +27,8 @@ class LeafletMapManager {
             blockedRoads: null,
             graphOverlay: null,
             trafficLights: null,
-            route: null,
+            normalRoute: null,
+            dijkstraRoute: null,
             markers: null,
             snapIndicator: null
         };
@@ -34,8 +37,7 @@ class LeafletMapManager {
         this.endNodeId = null;
         this.startMarker = null;
         this.endMarker = null;
-        this.activeTool = 'start';
-        this.showGraphOverlay = true;
+        this.showGraphOverlay = false; // Default: OFF for clean navigation map
 
         // Event callbacks
         this.onMapClickCallback = null;
@@ -47,10 +49,9 @@ class LeafletMapManager {
     }
 
     /**
-     * Initialize Leaflet Map centered on Central Hyderabad
+     * Initialize Leaflet Map centered on Central Hyderabad (Hussain Sagar / Secretariat)
      */
     initMap() {
-        // Central Hussain Sagar & Secretariat, Hyderabad
         const hyderabadCenter = [17.4225, 78.4720];
         const defaultZoom = 14;
 
@@ -59,19 +60,19 @@ class LeafletMapManager {
             zoom: defaultZoom,
             minZoom: 12,
             maxZoom: 18,
+            scrollWheelZoom: true, // Natural scroll zoom (NO Ctrl key requirement)
             zoomControl: false
         });
 
-        // Add sleek zoom control
+        // Add standard zoom control at bottom-right
         L.control.zoom({ position: 'bottomright' }).addTo(this.map);
 
-        // CartoDB Dark Matter tiles (OpenStreetMap attribution compliant)
-        const darkTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-            subdomains: 'abcd',
+        // Official OpenStreetMap tile layer (Reliable, high-clarity, no API key)
+        const osmTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
             maxZoom: 19
         });
-        darkTileLayer.addTo(this.map);
+        osmTileLayer.addTo(this.map);
 
         // Layer Groups
         this.layers.baseRoads = L.layerGroup().addTo(this.map);
@@ -79,7 +80,8 @@ class LeafletMapManager {
         this.layers.blockedRoads = L.layerGroup().addTo(this.map);
         this.layers.graphOverlay = L.layerGroup().addTo(this.map);
         this.layers.trafficLights = L.layerGroup().addTo(this.map);
-        this.layers.route = L.layerGroup().addTo(this.map);
+        this.layers.normalRoute = L.layerGroup().addTo(this.map);
+        this.layers.dijkstraRoute = L.layerGroup().addTo(this.map);
         this.layers.markers = L.layerGroup().addTo(this.map);
         this.layers.snapIndicator = L.layerGroup().addTo(this.map);
 
@@ -92,7 +94,7 @@ class LeafletMapManager {
     }
 
     /**
-     * Render the entire road network with realistic geometry and distinct styling
+     * Render the road network according to display settings
      */
     renderRoadNetwork() {
         this.layers.baseRoads.clearLayers();
@@ -103,96 +105,101 @@ class LeafletMapManager {
 
         const renderedEdges = new Set();
 
-        // 1. Render Road Segments
+        // 1. Render Blocked Roads & Shortcuts (Always visible so user sees network constraints)
         for (const [, edge] of this.graph.edges) {
             const pairKey = [edge.from, edge.to].sort().join('--');
             if (renderedEdges.has(pairKey)) continue;
             renderedEdges.add(pairKey);
 
             const coords = edge.coordinates;
-            let polyline;
 
             if (edge.blocked || edge.roadType === 'blocked') {
-                // Blocked road (Red / Crimson dashed hazard)
-                polyline = L.polyline(coords, {
-                    color: '#ff1744',
-                    weight: 5,
+                // Blocked road (Bold Red / Hazard striped overlay)
+                const blockedLine = L.polyline(coords, {
+                    color: '#ef4444',
+                    weight: 6,
                     opacity: 0.9,
-                    dashArray: '7, 7',
+                    dashArray: '8, 8',
                     lineCap: 'round',
                     className: 'road-blocked-line'
                 });
-                polyline.bindTooltip(`🚫 <b>BLOCKED ROAD</b>: ${edge.name}<br>Weight: ∞ (Impassable)`, {
-                    className: 'glass-tooltip',
+                blockedLine.bindTooltip(`🚧 <b>ROAD BLOCKED</b>: ${edge.name}<br>Weight: ∞ (Impassable)`, {
+                    className: 'nav-glass-tooltip',
                     sticky: true
                 });
-                polyline.on('click', (e) => {
+                blockedLine.on('click', (e) => {
                     L.DomEvent.stopPropagation(e);
                     if (this.onEdgeClickCallback) this.onEdgeClickCallback(edge);
                 });
-                this.layers.blockedRoads.addLayer(polyline);
+                this.layers.blockedRoads.addLayer(blockedLine);
             } else if (edge.roadType === 'shortcut') {
-                // Express Shortcut (Luminous Green 0.5x)
-                polyline = L.polyline(coords, {
-                    color: '#00e676',
+                // Shortcut (Distinct Purple / Indigo Corridor)
+                const shortcutLine = L.polyline(coords, {
+                    color: '#8b5cf6',
                     weight: 4.5,
                     opacity: 0.85,
                     lineCap: 'round',
+                    dashArray: '4, 4',
                     className: 'road-shortcut-line'
                 });
-                polyline.bindTooltip(`🟢 <b>EXPRESS SHORTCUT</b>: ${edge.name}<br>Weight Multiplier: 0.5x | Dist: ${edge.distance} km`, {
-                    className: 'glass-tooltip',
+                shortcutLine.bindTooltip(`⚡ <b>EXPRESS SHORTCUT</b>: ${edge.name}<br>Speed: ${edge.speedKmH} km/h | Dist: ${edge.distance} km`, {
+                    className: 'nav-glass-tooltip',
                     sticky: true
                 });
-                polyline.on('click', (e) => {
+                shortcutLine.on('click', (e) => {
                     L.DomEvent.stopPropagation(e);
                     if (this.onEdgeClickCallback) this.onEdgeClickCallback(edge);
                 });
-                this.layers.shortcuts.addLayer(polyline);
-            } else {
-                // Normal Road (Neutral Dark Slate with crisp contrast)
-                polyline = L.polyline(coords, {
-                    color: '#37474f',
-                    weight: 3.5,
-                    opacity: 0.75,
-                    lineCap: 'round',
-                    className: 'road-normal-line'
+                this.layers.shortcuts.addLayer(shortcutLine);
+            } else if (this.showGraphOverlay) {
+                // In Graph Overlay mode, draw subtle dark lines for all edges
+                const normalLine = L.polyline(coords, {
+                    color: '#475569',
+                    weight: 3,
+                    opacity: 0.7,
+                    lineCap: 'round'
                 });
-                polyline.bindTooltip(`🛣️ <b>${edge.name}</b><br>Normal Road (1.0x) | Dist: ${edge.distance} km`, {
-                    className: 'glass-tooltip',
+                normalLine.bindTooltip(`🛣️ <b>${edge.name}</b><br>Normal Road (Speed: ${edge.speedKmH} km/h) | Dist: ${edge.distance} km`, {
+                    className: 'nav-glass-tooltip',
                     sticky: true
                 });
-                polyline.on('click', (e) => {
+                normalLine.on('click', (e) => {
                     L.DomEvent.stopPropagation(e);
                     if (this.onEdgeClickCallback) this.onEdgeClickCallback(edge);
                 });
-                this.layers.baseRoads.addLayer(polyline);
+                this.layers.baseRoads.addLayer(normalLine);
             }
         }
 
-        // 2. Render Traffic Light Signals on intersections
+        // 2. Render Traffic Light Signals (Green, Yellow, Red)
         for (const [, node] of this.graph.nodes) {
             if (node.trafficLight) {
-                const isRed = node.trafficState === 'red';
-                const stateColor = isRed ? '#ff1744' : '#ffd600';
-                const delayText = isRed ? '+4.0' : '+1.5';
+                const state = node.trafficState || 'green';
+                let stateColor = '#22c55e'; // Green
+                let delayText = '0s';
+
+                if (state === 'red') {
+                    stateColor = '#ef4444';
+                    delayText = '+75s';
+                } else if (state === 'yellow') {
+                    stateColor = '#eab308';
+                    delayText = '+20s';
+                }
 
                 const trafficHtml = `
-                    <div class="traffic-signal-box">
-                        <div class="traffic-visor"></div>
-                        <div class="traffic-housing">
-                            <div class="traffic-light-lamp red ${isRed ? 'active' : ''}"></div>
-                            <div class="traffic-light-lamp yellow ${!isRed ? 'active' : ''}"></div>
-                        </div>
-                        <div class="traffic-light-badge">${delayText}</div>
+                    <div class="traffic-signal-box state-${state}">
+                        <div class="traffic-signal-lamp red ${state === 'red' ? 'lit' : ''}"></div>
+                        <div class="traffic-signal-lamp yellow ${state === 'yellow' ? 'lit' : ''}"></div>
+                        <div class="traffic-signal-lamp green ${state === 'green' ? 'lit' : ''}"></div>
+                        <div class="traffic-signal-delay-badge">${delayText}</div>
                     </div>
                 `;
 
                 const trafficIcon = L.divIcon({
-                    className: 'custom-traffic-div-icon',
+                    className: 'custom-traffic-icon-wrap',
                     html: trafficHtml,
-                    iconSize: [24, 40],
-                    iconAnchor: [12, 20]
+                    iconSize: [26, 44],
+                    iconAnchor: [13, 22]
                 });
 
                 const lightMarker = L.marker([node.lat, node.lng], {
@@ -200,8 +207,8 @@ class LeafletMapManager {
                     zIndexOffset: 800
                 });
 
-                lightMarker.bindTooltip(`🚦 <b>Traffic Light</b>: ${node.name}<br>Current State: <b>${node.trafficState.toUpperCase()}</b> (Cost Delay: ${delayText})`, {
-                    className: 'glass-tooltip'
+                lightMarker.bindTooltip(`🚦 <b>Traffic Light</b>: ${node.name}<br>State: <b>${state.toUpperCase()}</b> (Delay: ${delayText})`, {
+                    className: 'nav-glass-tooltip'
                 });
 
                 lightMarker.on('click', (e) => {
@@ -213,27 +220,22 @@ class LeafletMapManager {
             }
         }
 
-        // 3. Render Graph Nodes Overlay (Intersections)
+        // 3. Render Graph Nodes Overlay (Only when Show Graph is enabled)
         if (this.showGraphOverlay) {
             for (const [, node] of this.graph.nodes) {
-                const isStart = node.id === this.startNodeId;
-                const isEnd = node.id === this.endNodeId;
-
-                // Do not obscure start/end markers with circle markers
-                if (isStart || isEnd) continue;
+                if (node.id === this.startNodeId || node.id === this.endNodeId) continue;
 
                 const nodeMarker = L.circleMarker([node.lat, node.lng], {
-                    radius: 4.5,
-                    fillColor: node.blocked ? '#ff1744' : '#64b5f6',
+                    radius: 5,
+                    fillColor: node.blocked ? '#ef4444' : '#3b82f6',
                     color: '#ffffff',
                     weight: 1.5,
-                    opacity: 0.9,
-                    fillOpacity: 0.85,
-                    className: 'graph-node-circle'
+                    opacity: 0.95,
+                    fillOpacity: 0.85
                 });
 
-                nodeMarker.bindTooltip(`📍 <b>${node.name}</b><br>ID: ${node.id}`, {
-                    className: 'glass-tooltip'
+                nodeMarker.bindTooltip(`📍 <b>${node.name}</b>`, {
+                    className: 'nav-glass-tooltip'
                 });
 
                 nodeMarker.on('click', (e) => {
@@ -248,141 +250,216 @@ class LeafletMapManager {
 
     /**
      * Show an animated Snap-to-Road ripple indicator at the clicked location
-     * showing where the user clicked and how it snaps to the road.
      */
-    showSnapIndicator(clickedLat, clickedLng, snappedLat, snappedLng) {
+    showSnapIndicator(clickLat, clickLng, snappedLat, snappedLng) {
         this.layers.snapIndicator.clearLayers();
 
-        // Connect clicked position to snapped position with a dashed line if displaced
-        const distMeters = this.graph.constructor.calculateHaversine(clickedLat, clickedLng, snappedLat, snappedLng) * 1000;
-
-        if (distMeters > 5) {
-            const snapLine = L.polyline([[clickedLat, clickedLng], [snappedLat, snappedLng]], {
-                color: '#64b5f6',
+        // 1. Dash line from click point to snapped point
+        if (clickLat !== snappedLat || clickLng !== snappedLng) {
+            const connectLine = L.polyline([[clickLat, clickLng], [snappedLat, snappedLng]], {
+                color: '#10b981',
                 weight: 2,
                 dashArray: '3, 4',
                 opacity: 0.8
             });
-            this.layers.snapIndicator.addLayer(snapLine);
+            this.layers.snapIndicator.addLayer(connectLine);
         }
 
-        // Animated pulse ripple circle
-        const rippleMarker = L.circleMarker([snappedLat, snappedLng], {
-            radius: 8,
-            fillColor: '#00e5ff',
-            color: '#ffffff',
+        // 2. Animated pulse ring
+        const pulseCircle = L.circleMarker([snappedLat, snappedLng], {
+            radius: 12,
+            color: '#10b981',
+            fillColor: '#10b981',
+            fillOpacity: 0.25,
             weight: 2,
-            opacity: 1,
-            fillOpacity: 0.6,
-            className: 'snap-ripple-animation'
+            className: 'snap-pulse-circle'
         });
-        this.layers.snapIndicator.addLayer(rippleMarker);
+        this.layers.snapIndicator.addLayer(pulseCircle);
 
-        // Auto remove snap ripple after 1.5s
+        // Auto remove after 1.5s
         setTimeout(() => {
             this.layers.snapIndicator.clearLayers();
         }, 1500);
     }
 
     /**
-     * Set Start Location with Blue origin pin
+     * Set Origin Marker (Green Pin)
      */
     setStartMarker(node) {
+        if (!node) return;
         this.startNodeId = node.id;
 
         if (this.startMarker) {
             this.layers.markers.removeLayer(this.startMarker);
         }
 
+        const iconHtml = `
+            <div class="nav-pin-container pin-start">
+                <div class="nav-pin-tag">START</div>
+                <div class="nav-pin-body">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="#ffffff">
+                        <circle cx="12" cy="12" r="7"/>
+                    </svg>
+                </div>
+                <div class="nav-pin-pulse"></div>
+            </div>
+        `;
+
         const startIcon = L.divIcon({
-            className: 'custom-start-marker',
-            html: `
-                <div class="start-marker-pulse"></div>
-                <div class="start-marker-pin">🔵</div>
-                <div class="marker-title-tag">START</div>
-            `,
-            iconSize: [36, 46],
-            iconAnchor: [18, 23]
+            className: 'custom-nav-pin',
+            html: iconHtml,
+            iconSize: [50, 50],
+            iconAnchor: [25, 42]
         });
 
         this.startMarker = L.marker([node.lat, node.lng], {
             icon: startIcon,
-            zIndexOffset: 1200
-        }).addTo(this.layers.markers);
+            zIndexOffset: 1000
+        });
 
-        this.startMarker.bindTooltip(`🔵 <b>START</b>: ${node.name}`, { className: 'glass-tooltip' });
+        this.startMarker.bindTooltip(`🟢 <b>START</b>: ${node.name}`, {
+            permanent: false,
+            className: 'nav-glass-tooltip'
+        });
+
+        this.layers.markers.addLayer(this.startMarker);
         this.renderRoadNetwork();
     }
 
     /**
-     * Set Destination Location with Purple destination pin
+     * Set Destination Marker (Red Pin)
      */
     setEndMarker(node) {
+        if (!node) return;
         this.endNodeId = node.id;
 
         if (this.endMarker) {
             this.layers.markers.removeLayer(this.endMarker);
         }
 
+        const iconHtml = `
+            <div class="nav-pin-container pin-end">
+                <div class="nav-pin-tag">DESTINATION</div>
+                <div class="nav-pin-body">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="#ffffff">
+                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                    </svg>
+                </div>
+                <div class="nav-pin-pulse"></div>
+            </div>
+        `;
+
         const endIcon = L.divIcon({
-            className: 'custom-end-marker',
-            html: `
-                <div class="end-marker-pulse"></div>
-                <div class="end-marker-pin">🟣</div>
-                <div class="marker-title-tag">END</div>
-            `,
-            iconSize: [36, 46],
-            iconAnchor: [18, 23]
+            className: 'custom-nav-pin',
+            html: iconHtml,
+            iconSize: [80, 50],
+            iconAnchor: [40, 42]
         });
 
         this.endMarker = L.marker([node.lat, node.lng], {
             icon: endIcon,
-            zIndexOffset: 1200
-        }).addTo(this.layers.markers);
+            zIndexOffset: 1000
+        });
 
-        this.endMarker.bindTooltip(`🟣 <b>DESTINATION</b>: ${node.name}`, { className: 'glass-tooltip' });
+        this.endMarker.bindTooltip(`🔴 <b>DESTINATION</b>: ${node.name}`, {
+            permanent: false,
+            className: 'nav-glass-tooltip'
+        });
+
+        this.layers.markers.addLayer(this.endMarker);
         this.renderRoadNetwork();
     }
 
     /**
-     * Fit Map Viewport to encompass start, destination, and the complete route
+     * Render the Normal Route (subtle blue line)
      */
-    fitRoute(coords) {
-        if (!coords || coords.length === 0) return;
-        const bounds = L.latLngBounds(coords);
-        this.map.fitBounds(bounds, {
-            padding: [60, 60],
-            maxZoom: 15,
-            animate: true
+    renderNormalRoute(coords) {
+        this.layers.normalRoute.clearLayers();
+        if (!coords || coords.length < 2) return;
+
+        const polyline = L.polyline(coords, {
+            color: '#3b82f6',
+            weight: 5,
+            opacity: 0.75,
+            lineCap: 'round',
+            lineJoin: 'round',
+            className: 'route-normal-path'
         });
+
+        this.layers.normalRoute.addLayer(polyline);
+        return polyline;
     }
 
     /**
-     * Clear start and end markers
+     * Render the Dijkstra Fastest Route (vibrant emerald green line)
+     */
+    renderDijkstraRoute(coords) {
+        this.layers.dijkstraRoute.clearLayers();
+        if (!coords || coords.length < 2) return;
+
+        // Outer glow
+        const glow = L.polyline(coords, {
+            color: '#00e676',
+            weight: 9,
+            opacity: 0.35,
+            lineCap: 'round',
+            lineJoin: 'round',
+            className: 'route-glow-path'
+        });
+
+        // Sharp core polyline
+        const core = L.polyline(coords, {
+            color: '#10b981',
+            weight: 5,
+            opacity: 0.95,
+            lineCap: 'round',
+            lineJoin: 'round',
+            className: 'route-dijkstra-core'
+        });
+
+        this.layers.dijkstraRoute.addLayer(glow);
+        this.layers.dijkstraRoute.addLayer(core);
+        return core;
+    }
+
+    /**
+     * Clear all active route layers
+     */
+    clearRoutes() {
+        this.layers.normalRoute.clearLayers();
+        this.layers.dijkstraRoute.clearLayers();
+    }
+
+    /**
+     * Clear origin and destination markers
      */
     clearMarkers() {
-        if (this.startMarker) {
-            this.layers.markers.removeLayer(this.startMarker);
-            this.startMarker = null;
-        }
-        if (this.endMarker) {
-            this.layers.markers.removeLayer(this.endMarker);
-            this.endMarker = null;
-        }
+        this.layers.markers.clearLayers();
         this.startNodeId = null;
         this.endNodeId = null;
+        this.startMarker = null;
+        this.endMarker = null;
         this.renderRoadNetwork();
     }
 
     /**
-     * Toggle Graph Overlay visibility
+     * Toggle Graph Overlay visibility (Nodes and Edge lines)
      */
     setGraphOverlayVisibility(visible) {
-        this.showGraphOverlay = Boolean(visible);
-        if (this.showGraphOverlay) {
-            this.renderRoadNetwork();
-        } else {
-            this.layers.graphOverlay.clearLayers();
-        }
+        this.showGraphOverlay = visible;
+        this.renderRoadNetwork();
+    }
+
+    /**
+     * Fit viewport to encompass the given road coordinates
+     */
+    fitRoute(coordinates) {
+        if (!coordinates || coordinates.length === 0) return;
+        const bounds = L.latLngBounds(coordinates);
+        this.map.fitBounds(bounds, {
+            padding: [70, 70],
+            maxZoom: 16,
+            animate: true
+        });
     }
 }

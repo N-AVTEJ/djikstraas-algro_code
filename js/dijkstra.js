@@ -3,16 +3,14 @@
  * MANUAL DIJKSTRA'S ALGORITHM IMPLEMENTATION (js/dijkstra.js)
  * ============================================================================
  *
- * Core Shortest-Path Algorithm:
+ * Core Shortest-Path & Fastest-Route Engine:
  * Implemented natively in vanilla JavaScript without third-party routing APIs.
  *
  * Traversal Cost Model:
- *   Edge Cost = Road Segment Distance (km) * Road Multiplier + Destination Delay
- *   - Normal Road:    Multiplier = 1.0
- *   - Shortcut Road:  Multiplier = 0.5 (Express corridor)
- *   - Yellow Light:   +1.5 cost penalty
- *   - Red Light:      +4.0 cost penalty
- *   - Blocked Edge:   Weight = Infinity (Impassable)
+ *   Mode 1: 'fastest' (Dijkstra Fastest Simulated Route)
+ *     Cost = Travel Time (min) = (Distance / Speed) * 60 * Multiplier + Signal Delay
+ *   Mode 2: 'normal' (Normal / Casual Route)
+ *     Cost = Physical Road Distance (km)
  *
  * Complexity:
  *   - Time:  O((V + E) * log V) using Binary Min-Heap Priority Queue
@@ -82,15 +80,17 @@ class MinHeapPriorityQueue {
 
 class DijkstraRouter {
     /**
-     * Compute shortest path from startNodeId to targetNodeId
+     * Compute shortest/fastest path from startNodeId to targetNodeId
      *
      * @param {CityRoadGraph} graph - Topological Road Graph
      * @param {string} startNodeId - Origin Node ID
      * @param {string} targetNodeId - Destination Node ID
-     * @param {boolean} recordSteps - Whether to log step-by-step states for visualizer
+     * @param {Object} options - { mode: 'fastest' | 'normal', recordSteps: boolean }
      * @returns {Object} Route result containing path nodes, edges, coordinates, distances, and costs
      */
-    static findShortestPath(graph, startNodeId, targetNodeId, recordSteps = false) {
+    static findPath(graph, startNodeId, targetNodeId, options = {}) {
+        const mode = options.mode || 'fastest';
+        const recordSteps = options.recordSteps || false;
         const startTime = performance.now();
 
         // 1. Input Validation
@@ -111,19 +111,46 @@ class DijkstraRouter {
             return { success: false, error: `Destination (${targetNode.name}) is currently blocked.` };
         }
 
-        // 2. Initialize Data Structures
+        if (startNodeId === targetNodeId) {
+            return {
+                success: true,
+                mode,
+                startNode,
+                targetNode,
+                pathNodeIds: [startNodeId],
+                pathNodes: [startNode],
+                pathEdges: [],
+                roadCoordinates: [[startNode.lat, startNode.lng]],
+                totalDistanceKm: 0,
+                estimatedTimeMin: 0,
+                weightedCost: 0,
+                trafficLightCount: 0,
+                redLightCount: 0,
+                yellowLightCount: 0,
+                shortcutCount: 0,
+                nodesExplored: 1,
+                edgesEvaluated: 0,
+                calcTimeMs: 0.1,
+                steps: []
+            };
+        }
+
+        // 2. Data Structures
         const distances = new Map(); // nodeId -> tentative cost
         const previous = new Map();  // nodeId -> { fromNodeId, edge }
         const visited = new Set();   // Settled nodes
         const pq = new MinHeapPriorityQueue();
         const steps = [];            // Step-by-step exploration log
 
+        let nodesExplored = 0;
+        let edgesEvaluated = 0;
+
         for (const [nodeId] of graph.nodes) {
             distances.set(nodeId, Infinity);
             previous.set(nodeId, null);
         }
 
-        // Distance to origin is 0
+        // Distance/Cost to origin is 0
         distances.set(startNodeId, 0);
         pq.push(startNodeId, 0);
 
@@ -132,13 +159,13 @@ class DijkstraRouter {
                 type: 'init',
                 nodeId: startNodeId,
                 cost: 0,
-                description: `Initialized search at [${startNode.name}]. Tentative cost = 0. All other nodes = ∞.`
+                description: `Initialized ${mode.toUpperCase()} search at [${startNode.name}]. Tentative cost = 0. All other nodes = ∞.`
             });
         }
 
         let destinationReached = false;
 
-        // 3. Main Dijkstra Greedy Traversal
+        // 3. Greedy Dijkstra Traversal
         while (!pq.isEmpty()) {
             const { item: currentId, priority: currentCost } = pq.pop();
 
@@ -147,6 +174,7 @@ class DijkstraRouter {
             if (currentCost === Infinity) break;
 
             visited.add(currentId);
+            nodesExplored++;
             const currentNode = graph.nodes.get(currentId);
 
             if (recordSteps) {
@@ -154,7 +182,7 @@ class DijkstraRouter {
                     type: 'visit',
                     nodeId: currentId,
                     cost: currentCost,
-                    description: `Evaluating intersection [${currentNode.name}] (Current shortest cost: ${currentCost.toFixed(2)})`
+                    description: `Evaluating intersection [${currentNode.name}] (Tentative cost: ${currentCost.toFixed(2)})`
                 });
             }
 
@@ -175,16 +203,16 @@ class DijkstraRouter {
             // 4. Relax outgoing road edges
             const outgoingEdges = graph.adjacencyList.get(currentId) || [];
             for (const edge of outgoingEdges) {
+                edgesEvaluated++;
                 const neighborId = edge.to;
                 const neighborNode = graph.nodes.get(neighborId);
 
                 // Skip settled nodes
                 if (visited.has(neighborId)) continue;
 
-                // Dynamic edge cost evaluation
-                const edgeCost = graph.getDynamicCost(edge);
+                // Dynamic edge cost evaluation based on routing mode
+                const edgeCost = graph.getDynamicCost(edge, mode);
                 if (edgeCost === Infinity) {
-                    // Blocked road / obstacle
                     if (recordSteps) {
                         steps.push({
                             type: 'blocked',
@@ -220,17 +248,20 @@ class DijkstraRouter {
 
         const calcTimeMs = performance.now() - startTime;
 
-        // 5. Reconstruct Shortest Path
+        // 5. Check if route was found
         if (!destinationReached && distances.get(targetNodeId) === Infinity) {
             return {
                 success: false,
-                error: `NO ROUTE AVAILABLE: The selected destination cannot be reached from the start point due to road blockades.`,
+                mode,
+                error: `No route is currently available between ${startNode.name} and ${targetNode.name}. Try removing a road blockade.`,
+                nodesExplored,
+                edgesEvaluated,
                 calcTimeMs: Number(calcTimeMs.toFixed(2)),
                 steps
             };
         }
 
-        // Backtrack path
+        // 6. Backtrack path
         const pathNodeIds = [];
         const pathEdges = [];
         let curr = targetNodeId;
@@ -246,23 +277,33 @@ class DijkstraRouter {
             }
         }
 
-        // Single Source of Truth: Assemble continuous road coordinates
+        // 7. Assemble continuous road coordinates and calculate real metrics
         const pathNodes = pathNodeIds.map(id => graph.nodes.get(id));
         const roadCoordinates = [];
         let totalRoadDistanceKm = 0;
         let trafficLightCount = 0;
+        let redLightCount = 0;
+        let yellowLightCount = 0;
         let shortcutCount = 0;
-        let blockedEdgesEncountered = 0;
+        let totalTimeMinutes = 0;
 
         for (let i = 0; i < pathEdges.length; i++) {
             const edge = pathEdges[i];
             totalRoadDistanceKm += edge.distance;
             if (edge.roadType === 'shortcut') shortcutCount++;
 
-            // Destination node of this edge
+            // Destination intersection of this edge
             const toNode = graph.nodes.get(edge.to);
             if (toNode && toNode.trafficLight) {
                 trafficLightCount++;
+                if (toNode.trafficState === 'red') redLightCount++;
+                else if (toNode.trafficState === 'yellow') yellowLightCount++;
+            }
+
+            // Real travel time for this edge
+            const edgeTravelTime = graph.getTravelTimeCost(edge);
+            if (edgeTravelTime !== Infinity) {
+                totalTimeMinutes += edgeTravelTime;
             }
 
             // Append edge coordinates
@@ -270,26 +311,32 @@ class DijkstraRouter {
             if (roadCoordinates.length === 0) {
                 roadCoordinates.push(...coords);
             } else {
-                // Avoid repeating shared intersection coordinate
                 roadCoordinates.push(...coords.slice(1));
             }
         }
 
-        const totalCost = Number(distances.get(targetNodeId).toFixed(2));
+        const weightedCost = Number(distances.get(targetNodeId).toFixed(2));
+        const estimatedTimeMin = Number(totalTimeMinutes.toFixed(1));
 
         return {
             success: true,
+            mode,
             startNode,
             targetNode,
             pathNodeIds,
             pathNodes,
             pathEdges,
             roadCoordinates,
-            totalCost,
             totalDistanceKm: Number(totalRoadDistanceKm.toFixed(2)),
+            estimatedTimeMin,
+            weightedCost,
             stepCount: pathNodes.length,
             trafficLightCount,
+            redLightCount,
+            yellowLightCount,
             shortcutCount,
+            nodesExplored,
+            edgesEvaluated,
             calcTimeMs: Number(calcTimeMs.toFixed(2)),
             steps
         };

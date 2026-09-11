@@ -1,22 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CityNav Simulator — Road-Based Dijkstra & Traffic Engine</title>
-    <meta name="description" content="Realistic road-aligned city navigation simulator and Dijkstra algorithm visualizer in Hyderabad, India with dynamic traffic signals and smooth vehicle animation.">
+    <meta name="description"
+        content="Realistic road-aligned city navigation simulator and Dijkstra algorithm visualizer in Hyderabad, India with dynamic traffic signals and smooth vehicle animation.">
 
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
 
     <!-- Leaflet 1.9.4 Official CDN CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 
     <!-- Custom Production Styles -->
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <!-- Top Application Header -->
     <header class="app-header">
@@ -29,8 +34,10 @@
         </div>
 
         <div class="header-actions">
-            <button id="btnDemoMode" class="btn btn-demo" title="Load predefined college presentation scenario">🌟 Demo Mode</button>
-            <button id="btnToggleExplainer" class="btn btn-secondary" title="View algorithmic cost breakdown">📖 How Dijkstra Works</button>
+            <button id="btnDemoMode" class="btn btn-demo" title="Load predefined college presentation scenario">🌟 Demo
+                Mode</button>
+            <button id="btnToggleExplainer" class="btn btn-secondary" title="View algorithmic cost breakdown">📖 How
+                Dijkstra Works</button>
             <button id="btnAbout" class="btn btn-secondary" title="About architecture & technologies">ℹ️ About</button>
             <span id="routeStatusBadge" class="status-badge badge-idle">READY</span>
         </div>
@@ -41,23 +48,32 @@
         <!-- Snapping & Placement Tools -->
         <div class="tool-group">
             <span class="group-label">Tools:</span>
-            <button id="toolStart" class="btn tool-btn active" data-tool="start" title="Snap Origin to nearest road">🔵 Set Start</button>
-            <button id="toolEnd" class="btn tool-btn" data-tool="end" title="Snap Destination to nearest road">🟣 Set Destination</button>
-            <button id="toolTrafficLight" class="btn tool-btn" data-tool="traffic-light" title="Toggle traffic light on intersection">🚦 Traffic Light</button>
-            <button id="toolShortcut" class="btn tool-btn" data-tool="shortcut" title="Toggle Express Shortcut (0.5x cost)">🟢 Shortcut</button>
-            <button id="toolBlock" class="btn tool-btn" data-tool="block" title="Block road segment (Weight: ∞)">🧱 Block Road</button>
-            <button id="toolSelect" class="btn tool-btn" data-tool="select" title="Inspect road and intersection metadata">🔍 Inspect</button>
+            <button id="toolStart" class="btn tool-btn active" data-tool="start" title="Snap Origin to nearest road">🔵
+                Set Start</button>
+            <button id="toolEnd" class="btn tool-btn" data-tool="end" title="Snap Destination to nearest road">🟣 Set
+                Destination</button>
+            <button id="toolTrafficLight" class="btn tool-btn" data-tool="traffic-light"
+                title="Toggle traffic light on intersection">🚦 Traffic Light</button>
+            <button id="toolShortcut" class="btn tool-btn" data-tool="shortcut"
+                title="Toggle Express Shortcut (0.5x cost)">🟢 Shortcut</button>
+            <button id="toolBlock" class="btn tool-btn" data-tool="block" title="Block road segment (Weight: ∞)">🧱
+                Block Road</button>
+            <button id="toolSelect" class="btn tool-btn" data-tool="select"
+                title="Inspect road and intersection metadata">🔍 Inspect</button>
         </div>
 
         <div class="toolbar-divider"></div>
 
         <!-- Algorithm & View Controls -->
         <div class="tool-group">
-            <button id="btnRunDijkstra" class="btn btn-run" title="Calculate shortest weighted path immediately">⚡ Run Dijkstra</button>
-            <button id="btnVisualizeDijkstra" class="btn btn-viz" title="Step-by-step exploration animation">👁️ Visualize Dijkstra</button>
+            <button id="btnRunDijkstra" class="btn btn-run" title="Calculate shortest weighted path immediately">⚡ Run
+                Dijkstra</button>
+            <button id="btnVisualizeDijkstra" class="btn btn-viz" title="Step-by-step exploration animation">👁️
+                Visualize Dijkstra</button>
             <button id="btnFitRoute" class="btn" title="Fit map viewport to complete route">🎯 Fit Route</button>
             <button id="btnClearRoute" class="btn" title="Clear current route">🧹 Clear Route</button>
-            <button id="btnReset" class="btn btn-reset" title="Reset all obstacles, shortcuts, and markers">🔄 Reset</button>
+            <button id="btnReset" class="btn btn-reset" title="Reset all obstacles, shortcuts, and markers">🔄
+                Reset</button>
         </div>
 
         <div class="toolbar-divider"></div>
@@ -142,7 +158,8 @@
                 <span class="panel-title">🚗 Vehicle Simulation</span>
             </div>
             <div class="vehicle-controls-row">
-                <button id="btnVehiclePlay" class="btn btn-primary btn-sm" title="Animate vehicle along road geometry">▶️ Animate</button>
+                <button id="btnVehiclePlay" class="btn btn-primary btn-sm"
+                    title="Animate vehicle along road geometry">▶️ Animate</button>
                 <button id="btnVehiclePause" class="btn btn-sm" title="Pause simulation">⏸️ Pause</button>
                 <button id="btnVehicleReset" class="btn btn-sm" title="Reset to start">⏹️ Reset</button>
                 <select id="vehicleSpeedSelect" class="speed-select" title="Animation speed multiplier">
@@ -209,14 +226,16 @@
                         <div class="step-badge">1</div>
                         <div class="step-content">
                             <h4>Initialize Distances</h4>
-                            <p>Set tentative distance to Origin = 0. All other nodes = ∞. Insert Origin into the Min-Priority Queue (Binary Min-Heap).</p>
+                            <p>Set tentative distance to Origin = 0. All other nodes = ∞. Insert Origin into the
+                                Min-Priority Queue (Binary Min-Heap).</p>
                         </div>
                     </div>
                     <div class="flow-step">
                         <div class="step-badge">2</div>
                         <div class="step-content">
                             <h4>Greedy Selection</h4>
-                            <p>Extract unvisited node $u$ with the minimum tentative cost from the Priority Queue in $O(\log V)$ time.</p>
+                            <p>Extract unvisited node $u$ with the minimum tentative cost from the Priority Queue in
+                                $O(\log V)$ time.</p>
                         </div>
                     </div>
                     <div class="flow-step">
@@ -225,7 +244,8 @@
                             <h4>Dynamic Edge Relaxation</h4>
                             <p>For each outgoing road edge $(u, v)$, compute dynamic weight:</p>
                             <div class="formula-box">
-                                $\text{Edge Cost} = \text{Distance (km)} \times \text{Road Multiplier} + \text{Traffic Delay}$
+                                $\text{Edge Cost} = \text{Distance (km)} \times \text{Road Multiplier} + \text{Traffic
+                                Delay}$
                             </div>
                             <ul class="cost-breakdown-list">
                                 <li>Normal Road = <code>1.0</code></li>
@@ -234,14 +254,16 @@
                                 <li>Red Traffic Light = <code>+4.0</code></li>
                                 <li>Blocked Road = <code>Infinity</code></li>
                             </ul>
-                            <p>If $\text{dist}[u] + \text{cost}(u,v) < \text{dist}[v]$, update $\text{dist}[v]$ and record predecessor.</p>
+                            <p>If $\text{dist}[u] + \text{cost}(u,v) < \text{dist}[v]$, update $\text{dist}[v]$ and
+                                    record predecessor.</p>
                         </div>
                     </div>
                     <div class="flow-step">
                         <div class="step-badge">4</div>
                         <div class="step-content">
                             <h4>Backtrack Optimal Path</h4>
-                            <p>Upon reaching the Destination, backtrack predecessors to assemble the sequence of road coordinates for Leaflet polyline rendering and smooth vehicle animation.</p>
+                            <p>Upon reaching the Destination, backtrack predecessors to assemble the sequence of road
+                                coordinates for Leaflet polyline rendering and smooth vehicle animation.</p>
                         </div>
                     </div>
                 </div>
@@ -256,24 +278,32 @@
                     <button id="btnCloseAbout" class="btn-close" title="Close Modal">✕</button>
                 </div>
                 <div class="modal-content">
-                    <p>This application is an educational, production-quality city navigation simulator demonstrating <b>Dijkstra's Algorithm</b> on a realistic road network in <b>Hyderabad, India</b>.</p>
-                    
+                    <p>This application is an educational, production-quality city navigation simulator demonstrating
+                        <b>Dijkstra's Algorithm</b> on a realistic road network in <b>Hyderabad, India</b>.</p>
+
                     <h4>Architectural Separation:</h4>
                     <ul>
-                        <li><b>Leaflet 1.9.4:</b> Used strictly for geographic map presentation, OpenStreetMap tiles, SVG markers, and polyline visualization.</li>
-                        <li><b>Custom Pure JavaScript Engine:</b> Dijkstra's Algorithm, Binary Min-Heap Priority Queue, dynamic traffic weight calculation, and road snapping are implemented manually without any external routing API (no Google, Mapbox, or OSRM).</li>
-                        <li><b>Single Source of Truth:</b> Road geometry coordinates drive both the displayed route polyline and the 60fps vehicle animation.</li>
+                        <li><b>Leaflet 1.9.4:</b> Used strictly for geographic map presentation, OpenStreetMap tiles,
+                            SVG markers, and polyline visualization.</li>
+                        <li><b>Custom Pure JavaScript Engine:</b> Dijkstra's Algorithm, Binary Min-Heap Priority Queue,
+                            dynamic traffic weight calculation, and road snapping are implemented manually without any
+                            external routing API (no Google, Mapbox, or OSRM).</li>
+                        <li><b>Single Source of Truth:</b> Road geometry coordinates drive both the displayed route
+                            polyline and the 60fps vehicle animation.</li>
                     </ul>
 
                     <h4>Dynamic Real-Time Recalculation:</h4>
-                    <p>Every 3 seconds, traffic lights cycle between Yellow (1.5) and Red (4.0). If a signal delay makes an alternative boulevard cheaper, Dijkstra reroutes dynamically and smoothly transfers the moving vehicle.</p>
+                    <p>Every 3 seconds, traffic lights cycle between Yellow (1.5) and Red (4.0). If a signal delay makes
+                        an alternative boulevard cheaper, Dijkstra reroutes dynamically and smoothly transfers the
+                        moving vehicle.</p>
                 </div>
             </div>
         </div>
     </main>
 
     <!-- Leaflet 1.9.4 Official CDN JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
     <!-- Application Modular Architecture Scripts -->
     <script src="js/graph.js"></script>
@@ -285,4 +315,5 @@
     <script src="js/ui.js"></script>
     <script src="js/app.js"></script>
 </body>
+
 </html>

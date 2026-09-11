@@ -1,77 +1,103 @@
 /**
  * ============================================================================
- * USER INTERFACE & TELEMETRY CONTROLLER (js/ui.js)
+ * USER INTERFACE CONTROLLER & VIEW MANAGER (js/ui.js)
  * ============================================================================
  *
  * Responsibilities:
- * 1. Manages toolbar interaction modes & active tool indicators.
- * 2. Updates Route Telemetry & Statistics HUD dynamically.
- * 3. Controls vehicle animation playback, speeds, and camera follow modes.
- * 4. Renders "How Dijkstra Works" educational panel and About modal.
- * 5. Displays contextual feedback notifications and status badges.
+ * 1. Coordinates user interactions, toolbar states, and mode selections.
+ * 2. Manages Search input, instant autocomplete dropdown, and POI filtering.
+ * 3. Updates the Route Comparison card and "Why Dijkstra?" explainability panel.
+ * 4. Updates vehicle animation progress bar and Navigation Event Timeline.
+ * 5. Manages algorithm telemetry counters and "How Dijkstra Works" modal.
  */
 
 class UIManager {
     constructor() {
         this.elements = {
-            // Tools
-            toolBtns: document.querySelectorAll('.tool-btn'),
-            btnStart: document.getElementById('toolStart'),
-            btnEnd: document.getElementById('toolEnd'),
-            btnTrafficLight: document.getElementById('toolTrafficLight'),
-            btnShortcut: document.getElementById('toolShortcut'),
-            btnBlock: document.getElementById('toolBlock'),
-            btnSelect: document.getElementById('toolSelect'),
+            // Search
+            searchInput: document.getElementById('searchInput'),
+            btnClearSearch: document.getElementById('btnClearSearch'),
+            searchDropdown: document.getElementById('searchDropdown'),
 
-            // Actions
-            btnRunDijkstra: document.getElementById('btnRunDijkstra'),
-            btnVisualizeDijkstra: document.getElementById('btnVisualizeDijkstra'),
+            // Routing Mode Pills
+            modePills: document.querySelectorAll('.mode-pill'),
+            btnModeNormal: document.getElementById('btnModeNormal'),
+            btnModeDijkstra: document.getElementById('btnModeDijkstra'),
+            btnModeCompare: document.getElementById('btnModeCompare'),
+
+            // Demo Scenario Select
+            demoScenarioSelect: document.getElementById('demoScenarioSelect'),
+
+            // Header Actions & Status
+            btnToggleExplainer: document.getElementById('btnToggleExplainer'),
+            routeStatusBadge: document.getElementById('routeStatusBadge'),
+            infoBanner: document.getElementById('infoBanner'),
+
+            // Trip Details
+            labelStartLoc: document.getElementById('labelStartLoc'),
+            labelEndLoc: document.getElementById('labelEndLoc'),
+            btnSwapLocations: document.getElementById('btnSwapLocations'),
+
+            // Tools Bar
+            toolBtns: document.querySelectorAll('.tool-btn'),
+            btnCalculateRoute: document.getElementById('btnCalculateRoute'),
             btnFitRoute: document.getElementById('btnFitRoute'),
-            btnDemoMode: document.getElementById('btnDemoMode'),
-            btnReset: document.getElementById('btnReset'),
             btnClearRoute: document.getElementById('btnClearRoute'),
+            btnResetAll: document.getElementById('btnResetAll'),
+
+            // Comparison & Explainability Cards
+            cardComparison: document.getElementById('cardComparison'),
+            compNormalDist: document.getElementById('compNormalDist'),
+            compNormalTime: document.getElementById('compNormalTime'),
+            compDijkstraDist: document.getElementById('compDijkstraDist'),
+            compDijkstraTime: document.getElementById('compDijkstraTime'),
+            compTimeSaved: document.getElementById('compTimeSaved'),
+            compDistDiff: document.getElementById('compDistDiff'),
+
+            cardExplainability: document.getElementById('cardExplainability'),
+            explainabilityList: document.getElementById('explainabilityList'),
+
+            // Settings & Toggles
+            toggleShowGraph: document.getElementById('toggleShowGraph'),
+            toggleAutoTraffic: document.getElementById('toggleAutoTraffic'),
+            toggleShowPOIs: document.getElementById('toggleShowPOIs'),
+            categoryChips: document.querySelectorAll('.chip'),
 
             // Vehicle Controls
             btnVehiclePlay: document.getElementById('btnVehiclePlay'),
             btnVehiclePause: document.getElementById('btnVehiclePause'),
             btnVehicleReset: document.getElementById('btnVehicleReset'),
-            vehicleSpeedSelect: document.getElementById('vehicleSpeedSelect'),
+            btnVehicleReplay: document.getElementById('btnVehicleReplay'),
+            speedBtns: document.querySelectorAll('.btn-speed'),
             checkFollowVehicle: document.getElementById('checkFollowVehicle'),
+            progressBarFill: document.getElementById('progressBarFill'),
+            labelProgressPercent: document.getElementById('labelProgressPercent'),
 
-            // Toggles
-            toggleGraph: document.getElementById('toggleGraphOverlay'),
-            toggleAutoTraffic: document.getElementById('toggleAutoTraffic'),
-
-            // Info & Badges
-            infoBanner: document.getElementById('infoBanner'),
-            routeStatusBadge: document.getElementById('routeStatusBadge'),
+            // Visualizer & Timeline
+            btnVisualizeDijkstra: document.getElementById('btnVisualizeDijkstra'),
+            btnToggleTimeline: document.getElementById('btnToggleTimeline'),
+            timelineDrawer: document.getElementById('timelineDrawer'),
+            timelineList: document.getElementById('timelineList'),
 
             // Telemetry Counters
-            statStartLoc: document.getElementById('statStartLoc'),
-            statEndLoc: document.getElementById('statEndLoc'),
-            statDistance: document.getElementById('statDistance'),
-            statCost: document.getElementById('statCost'),
-            statGraphNodes: document.getElementById('statGraphNodes'),
+            statNodesExplored: document.getElementById('statNodesExplored'),
+            statEdgesEvaluated: document.getElementById('statEdgesEvaluated'),
+            statExecTime: document.getElementById('statExecTime'),
             statPathNodes: document.getElementById('statPathNodes'),
-            statTrafficLights: document.getElementById('statTrafficLights'),
-            statShortcuts: document.getElementById('statShortcuts'),
-            statBlockedRoads: document.getElementById('statBlockedRoads'),
-            statCalcTime: document.getElementById('statCalcTime'),
 
-            // Modals & Drawers
-            btnToggleExplainer: document.getElementById('btnToggleExplainer'),
-            explainerDrawer: document.getElementById('explainerDrawer'),
-            btnCloseExplainer: document.getElementById('btnCloseExplainer'),
-            btnAbout: document.getElementById('btnAbout'),
-            aboutModal: document.getElementById('aboutModal'),
-            btnCloseAbout: document.getElementById('btnCloseAbout')
+            // Educational Modal
+            explainerModal: document.getElementById('explainerModal'),
+            btnCloseExplainer: document.getElementById('btnCloseExplainer')
         };
 
         this.currentTool = 'start';
-        this.initEventListeners();
+        this.currentMode = 'dijkstra'; // 'normal' | 'dijkstra' | 'compare'
+        this.timelineStartTime = Date.now();
+
+        this.initBaseEvents();
     }
 
-    initEventListeners() {
+    initBaseEvents() {
         // Tool button selection
         this.elements.toolBtns.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -79,27 +105,37 @@ class UIManager {
             });
         });
 
-        // Educational Drawer toggle
-        if (this.elements.btnToggleExplainer && this.elements.explainerDrawer) {
-            this.elements.btnToggleExplainer.addEventListener('click', () => {
-                this.elements.explainerDrawer.classList.toggle('open');
+        // Routing Mode selection
+        this.elements.modePills.forEach(pill => {
+            pill.addEventListener('click', () => {
+                this.setActiveMode(pill.dataset.mode);
             });
-        }
-        if (this.elements.btnCloseExplainer && this.elements.explainerDrawer) {
-            this.elements.btnCloseExplainer.addEventListener('click', () => {
-                this.elements.explainerDrawer.classList.remove('open');
+        });
+
+        // Speed buttons
+        this.elements.speedBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.elements.speedBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        // Timeline drawer toggle
+        if (this.elements.btnToggleTimeline && this.elements.timelineDrawer) {
+            this.elements.btnToggleTimeline.addEventListener('click', () => {
+                this.elements.timelineDrawer.classList.toggle('hidden');
             });
         }
 
-        // About Modal
-        if (this.elements.btnAbout && this.elements.aboutModal) {
-            this.elements.btnAbout.addEventListener('click', () => {
-                this.elements.aboutModal.classList.remove('hidden');
+        // Explainer modal toggle
+        if (this.elements.btnToggleExplainer && this.elements.explainerModal) {
+            this.elements.btnToggleExplainer.addEventListener('click', () => {
+                this.elements.explainerModal.classList.remove('hidden');
             });
         }
-        if (this.elements.btnCloseAbout && this.elements.aboutModal) {
-            this.elements.btnCloseAbout.addEventListener('click', () => {
-                this.elements.aboutModal.classList.add('hidden');
+        if (this.elements.btnCloseExplainer && this.elements.explainerModal) {
+            this.elements.btnCloseExplainer.addEventListener('click', () => {
+                this.elements.explainerModal.classList.add('hidden');
             });
         }
     }
@@ -111,21 +147,28 @@ class UIManager {
         });
 
         const descriptions = {
-            'start': '🔵 Set Start: Click on or near any road to snap origin point.',
-            'end': '🟣 Set Destination: Click on or near any road to snap destination.',
-            'traffic-light': '🚦 Traffic Light: Click an intersection to add/remove a traffic signal.',
-            'shortcut': '🟢 Express Shortcut: Click any road segment to toggle 0.5x high-speed corridor.',
-            'block': '🧱 Block Road: Click any road to toggle blockade (Weight: ∞).',
-            'select': '🔍 Inspect: Click roads or intersections to view properties.'
+            'start': '🟢 <b>Set Start:</b> Click near any road or place in Hyderabad to snap origin.',
+            'end': '🔴 <b>Set Destination:</b> Click near any road or place to snap destination.',
+            'traffic-light': '🚦 <b>Traffic Light:</b> Click an intersection to add, remove, or switch signals.',
+            'shortcut': '⚡ <b>Express Shortcut:</b> Click any road segment to toggle 65 km/h high-speed bypass.',
+            'block': '🚧 <b>Block Road:</b> Click any road to toggle blockade (Weight: ∞).',
+            'inspect': '🔍 <b>Inspect:</b> Click roads or intersections to inspect properties.'
         };
 
         this.showBanner(descriptions[toolName] || 'Select an interaction tool.');
     }
 
-    showBanner(message, type = 'info') {
+    setActiveMode(modeName) {
+        this.currentMode = modeName;
+        this.elements.modePills.forEach(pill => {
+            pill.classList.toggle('active', pill.dataset.mode === modeName);
+        });
+    }
+
+    showBanner(htmlContent, type = 'info') {
         if (!this.elements.infoBanner) return;
         this.elements.infoBanner.className = `info-banner banner-${type}`;
-        this.elements.infoBanner.innerHTML = message;
+        this.elements.infoBanner.innerHTML = htmlContent;
     }
 
     setStatusBadge(text, stateClass) {
@@ -134,64 +177,96 @@ class UIManager {
         this.elements.routeStatusBadge.textContent = text;
     }
 
-    updateTelemetry(routeResult, graph, startNode, endNode) {
-        // Update Start & Destination
-        if (this.elements.statStartLoc) {
-            this.elements.statStartLoc.textContent = startNode 
-                ? `${startNode.name} (${startNode.lat.toFixed(4)}, ${startNode.lng.toFixed(4)})` 
-                : 'None Selected';
+    updateTripLabels(startNode, endNode) {
+        if (this.elements.labelStartLoc) {
+            this.elements.labelStartLoc.textContent = startNode ? startNode.name : 'None Selected';
         }
-        if (this.elements.statEndLoc) {
-            this.elements.statEndLoc.textContent = endNode 
-                ? `${endNode.name} (${endNode.lat.toFixed(4)}, ${endNode.lng.toFixed(4)})` 
-                : 'None Selected';
+        if (this.elements.labelEndLoc) {
+            this.elements.labelEndLoc.textContent = endNode ? endNode.name : 'None Selected';
+        }
+    }
+
+    updateComparisonAndExplainability(comparison) {
+        if (!comparison || !comparison.valid) {
+            this.elements.cardComparison?.classList.add('hidden');
+            this.elements.cardExplainability?.classList.add('hidden');
+            return;
         }
 
-        // Total Graph Nodes
-        if (this.elements.statGraphNodes) {
-            this.elements.statGraphNodes.textContent = graph ? graph.nodes.size : '--';
+        // 1. Show & populate Comparison Card
+        this.elements.cardComparison?.classList.remove('hidden');
+        if (this.elements.compNormalDist) this.elements.compNormalDist.textContent = `${comparison.normalDistanceKm} km`;
+        if (this.elements.compNormalTime) this.elements.compNormalTime.textContent = `${comparison.normalTimeMin} min`;
+        if (this.elements.compDijkstraDist) this.elements.compDijkstraDist.textContent = `${comparison.dijkstraDistanceKm} km`;
+        if (this.elements.compDijkstraTime) this.elements.compDijkstraTime.textContent = `${comparison.dijkstraTimeMin} min`;
+        if (this.elements.compTimeSaved) this.elements.compTimeSaved.textContent = `${comparison.timeSavedMin} min`;
+        if (this.elements.compDistDiff) {
+            const prefix = comparison.distDiffKm > 0 ? '+' : '';
+            this.elements.compDistDiff.textContent = `${prefix}${comparison.distDiffKm} km`;
         }
 
-        // Count active blocked roads
-        let blockedCount = 0;
-        if (graph) {
-            const counted = new Set();
-            for (const [, e] of graph.edges) {
-                const key = [e.from, e.to].sort().join('--');
-                if (!counted.has(key) && (e.blocked || e.roadType === 'blocked')) {
-                    blockedCount++;
-                    counted.add(key);
-                }
-            }
+        // 2. Show & populate Explainability Card
+        this.elements.cardExplainability?.classList.remove('hidden');
+        if (this.elements.explainabilityList && comparison.reasons) {
+            this.elements.explainabilityList.innerHTML = '';
+            comparison.reasons.forEach(reason => {
+                const li = document.createElement('li');
+                li.textContent = reason;
+                this.elements.explainabilityList.appendChild(li);
+            });
         }
-        if (this.elements.statBlockedRoads) {
-            this.elements.statBlockedRoads.textContent = blockedCount;
-        }
+    }
 
-        if (routeResult && routeResult.success) {
-            if (this.elements.statDistance) this.elements.statDistance.textContent = `${routeResult.totalDistanceKm} km`;
-            if (this.elements.statCost) this.elements.statCost.textContent = routeResult.totalCost.toFixed(2);
-            if (this.elements.statPathNodes) this.elements.statPathNodes.textContent = routeResult.stepCount;
-            if (this.elements.statTrafficLights) this.elements.statTrafficLights.textContent = routeResult.trafficLightCount;
-            if (this.elements.statShortcuts) this.elements.statShortcuts.textContent = routeResult.shortcutCount;
-            if (this.elements.statCalcTime) this.elements.statCalcTime.textContent = `${routeResult.calcTimeMs} ms`;
-            this.setStatusBadge('OPTIMAL ROUTE', 'badge-ready');
-        } else if (routeResult && !routeResult.success) {
-            if (this.elements.statDistance) this.elements.statDistance.textContent = '--';
-            if (this.elements.statCost) this.elements.statCost.textContent = '∞';
-            if (this.elements.statPathNodes) this.elements.statPathNodes.textContent = '--';
-            if (this.elements.statTrafficLights) this.elements.statTrafficLights.textContent = '--';
-            if (this.elements.statShortcuts) this.elements.statShortcuts.textContent = '--';
-            if (this.elements.statCalcTime) this.elements.statCalcTime.textContent = `${routeResult.calcTimeMs || 0} ms`;
-            this.setStatusBadge('NO ROUTE', 'badge-error');
-        } else {
-            if (this.elements.statDistance) this.elements.statDistance.textContent = '--';
-            if (this.elements.statCost) this.elements.statCost.textContent = '--';
-            if (this.elements.statPathNodes) this.elements.statPathNodes.textContent = '--';
-            if (this.elements.statTrafficLights) this.elements.statTrafficLights.textContent = '--';
-            if (this.elements.statShortcuts) this.elements.statShortcuts.textContent = '--';
-            if (this.elements.statCalcTime) this.elements.statCalcTime.textContent = '--';
-            this.setStatusBadge('IDLE', 'badge-idle');
+    updateTelemetry(dijkstraResult) {
+        if (!dijkstraResult) return;
+        if (this.elements.statNodesExplored) {
+            this.elements.statNodesExplored.textContent = dijkstraResult.nodesExplored || 0;
         }
+        if (this.elements.statEdgesEvaluated) {
+            this.elements.statEdgesEvaluated.textContent = dijkstraResult.edgesEvaluated || 0;
+        }
+        if (this.elements.statExecTime) {
+            this.elements.statExecTime.textContent = `${dijkstraResult.calcTimeMs || 0.1} ms`;
+        }
+        if (this.elements.statPathNodes) {
+            this.elements.statPathNodes.textContent = dijkstraResult.stepCount || 0;
+        }
+    }
+
+    updateProgressBar(percent) {
+        if (this.elements.progressBarFill) {
+            this.elements.progressBarFill.style.width = `${percent}%`;
+        }
+        if (this.elements.labelProgressPercent) {
+            this.elements.labelProgressPercent.textContent = `${percent}%`;
+        }
+    }
+
+    resetTimeline() {
+        this.timelineStartTime = Date.now();
+        if (this.elements.timelineList) {
+            this.elements.timelineList.innerHTML = `
+                <li class="timeline-item">
+                    <span class="time">00:00</span>
+                    <span class="event">Navigator initialized in Central Hyderabad.</span>
+                </li>
+            `;
+        }
+    }
+
+    addTimelineEvent(eventText) {
+        if (!this.elements.timelineList) return;
+        const elapsedSec = Math.floor((Date.now() - this.timelineStartTime) / 1000);
+        const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+        const ss = String(elapsedSec % 60).padStart(2, '0');
+
+        const item = document.createElement('li');
+        item.className = 'timeline-item';
+        item.innerHTML = `
+            <span class="time">${mm}:${ss}</span>
+            <span class="event">${eventText}</span>
+        `;
+        this.elements.timelineList.appendChild(item);
+        this.elements.timelineList.scrollTop = this.elements.timelineList.scrollHeight;
     }
 }

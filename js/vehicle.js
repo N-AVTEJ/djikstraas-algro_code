@@ -1,15 +1,18 @@
 /**
  * ============================================================================
- * VEHICLE SIMULATOR & SMOOTH INTERPOLATION ENGINE (js/vehicle.js)
+ * VEHICLE SIMULATOR & INTERPOLATION ENGINE (js/vehicle.js)
  * ============================================================================
  *
  * Responsibilities:
- * 1. Animates an SVG sports sedan along the exact road coordinate polyline.
- * 2. Uses requestAnimationFrame for 60fps smooth geographic interpolation.
- * 3. Segment duration is strictly proportional to Haversine geographic distance.
- * 4. Continuously updates vehicle bearing/rotation to face the direction of travel.
- * 5. Handles dynamic route recalculation smoothly (reroutes from nearest road point).
- * 6. Supports "Follow Vehicle" smooth camera tracking.
+ * 1. Animates a sleek top-down SVG vehicle along exact road coordinates.
+ * 2. Uses requestAnimationFrame for 60fps smooth geographical interpolation.
+ * 3. Rotates according to road bearing heading.
+ * 4. Controls: Start, Pause, Resume, Reset, Replay.
+ * 5. Speeds: 0.5x, 1.0x, 2.0x, 4.0x.
+ * 6. "Follow Vehicle" map panning.
+ * 7. Live Route Progress tracking.
+ * 8. Seamless dynamic rerouting mid-journey without jumping back to origin.
+ * 9. Navigation timeline logging.
  */
 
 class VehicleNavigator {
@@ -17,20 +20,21 @@ class VehicleNavigator {
         this.map = leafletMap;
         this.marker = null;
         this.coordinates = [];       // [[lat, lng], ...]
-        this.currentSegmentIndex = 0; // Current index in coordinates array
+        this.currentSegmentIndex = 0; // Index in coordinates
         this.segmentProgress = 0;     // 0.0 to 1.0 along current segment
         this.isPlaying = false;
         this.isPaused = false;
-        this.speedFactor = 1.0;       // Configurable speed multiplier
-        this.baseSpeedKmH = 45;       // Simulated base speed: 45 km/h
+        this.speedMultiplier = 1.0;
+        this.baseSpeedKmh = 50;
         this.animationFrameId = null;
         this.lastTimestamp = null;
-        this.followVehicle = false;   // Follow camera toggle
+        this.followVehicle = false;
         this.currentPosition = null;  // { lat, lng }
         this.currentBearing = 0;
 
-        this.onProgressCallback = null;
+        this.onProgressCallback = null; // callback(percent, currentCoord)
         this.onCompleteCallback = null;
+        this.onTimelineEvent = null;    // callback(message)
     }
 
     /**
@@ -66,64 +70,60 @@ class VehicleNavigator {
     _ensureMarker(lat, lng, bearing = 0) {
         if (!this.marker) {
             const vehicleHtml = `
-                <div class="vehicle-marker-container">
-                    <div class="vehicle-shadow"></div>
-                    <div class="vehicle-svg-rotator" style="transform: rotate(${bearing}deg);">
-                        <svg class="vehicle-svg" viewBox="0 0 32 64" width="28" height="56" xmlns="http://www.w3.org/2000/svg">
+                <div class="vehicle-marker-wrapper">
+                    <div class="vehicle-rotator" style="transform: rotate(${bearing}deg);">
+                        <svg class="vehicle-svg" viewBox="0 0 32 64" width="26" height="52" xmlns="http://www.w3.org/2000/svg">
                             <defs>
                                 <linearGradient id="carBodyGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                    <stop offset="0%" stop-color="#0288d1" />
-                                    <stop offset="50%" stop-color="#29b6f6" />
-                                    <stop offset="100%" stop-color="#0288d1" />
+                                    <stop offset="0%" stop-color="#0284c7" />
+                                    <stop offset="50%" stop-color="#38bdf8" />
+                                    <stop offset="100%" stop-color="#0284c7" />
                                 </linearGradient>
                                 <linearGradient id="windshieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" stop-color="#1a237e" />
-                                    <stop offset="100%" stop-color="#0d47a1" />
+                                    <stop offset="0%" stop-color="#0f172a" />
+                                    <stop offset="100%" stop-color="#1e293b" />
                                 </linearGradient>
                             </defs>
                             <!-- Chassis Shadow -->
-                            <rect x="3" y="4" width="26" height="56" rx="7" fill="rgba(0,0,0,0.3)" filter="blur(1px)" />
+                            <rect x="3" y="4" width="26" height="54" rx="7" fill="rgba(0,0,0,0.35)" filter="blur(1px)" />
                             <!-- Wheels -->
-                            <rect x="0" y="10" width="4" height="11" rx="2" fill="#111" />
-                            <rect x="28" y="10" width="4" height="11" rx="2" fill="#111" />
-                            <rect x="0" y="43" width="4" height="11" rx="2" fill="#111" />
-                            <rect x="28" y="43" width="4" height="11" rx="2" fill="#111" />
+                            <rect x="0" y="10" width="4" height="10" rx="2" fill="#111827" />
+                            <rect x="28" y="10" width="4" height="10" rx="2" fill="#111827" />
+                            <rect x="0" y="42" width="4" height="10" rx="2" fill="#111827" />
+                            <rect x="28" y="42" width="4" height="10" rx="2" fill="#111827" />
                             <!-- Main Body -->
-                            <rect x="3" y="3" width="26" height="58" rx="8" fill="url(#carBodyGrad)" stroke="#ffffff" stroke-width="1" />
-                            <!-- Front Hood Accent -->
-                            <path d="M7 6 Q16 2 25 6 L24 16 Q16 14 8 16 Z" fill="#0277bd" />
+                            <rect x="3" y="3" width="26" height="56" rx="8" fill="url(#carBodyGrad)" stroke="#ffffff" stroke-width="1" />
                             <!-- Headlights -->
-                            <polygon points="5,5 10,4 9,8 5,7" fill="#fff9c4" />
-                            <polygon points="27,5 22,4 23,8 27,7" fill="#fff9c4" />
+                            <polygon points="5,4 10,3 9,7 5,6" fill="#fef08a" />
+                            <polygon points="27,4 22,3 23,7 27,6" fill="#fef08a" />
                             <!-- Windshield -->
-                            <path d="M6 18 Q16 16 26 18 L24 29 Q16 28 8 29 Z" fill="url(#windshieldGrad)" opacity="0.9" />
+                            <path d="M6 18 Q16 16 26 18 L24 28 Q16 27 8 28 Z" fill="url(#windshieldGrad)" />
                             <!-- Roof -->
-                            <rect x="7" y="29" width="18" height="16" rx="3" fill="#0288d1" />
+                            <rect x="7" y="27" width="18" height="18" rx="4" fill="#0369a1" />
                             <!-- Rear Window -->
-                            <path d="M8 46 Q16 47 24 46 L25 53 Q16 54 7 53 Z" fill="url(#windshieldGrad)" opacity="0.9" />
-                            <!-- Tail lights -->
-                            <rect x="5" y="59" width="5" height="2" rx="1" fill="#f44336" />
-                            <rect x="22" y="59" width="5" height="2" rx="1" fill="#f44336" />
+                            <path d="M8 46 Q16 45 24 46 L23 51 Q16 50 9 51 Z" fill="url(#windshieldGrad)" />
+                            <!-- Taillights -->
+                            <rect x="5" y="57" width="5" height="2" rx="1" fill="#ef4444" />
+                            <rect x="22" y="57" width="5" height="2" rx="1" fill="#ef4444" />
                         </svg>
                     </div>
                 </div>
             `;
 
-            const icon = L.divIcon({
+            const vehicleIcon = L.divIcon({
                 className: 'custom-vehicle-div-icon',
                 html: vehicleHtml,
-                iconSize: [28, 56],
-                iconAnchor: [14, 28]
+                iconSize: [32, 64],
+                iconAnchor: [16, 32]
             });
 
             this.marker = L.marker([lat, lng], {
-                icon,
-                zIndexOffset: 1500,
-                interactive: false
+                icon: vehicleIcon,
+                zIndexOffset: 1200
             }).addTo(this.map);
         } else {
             this.marker.setLatLng([lat, lng]);
-            const rotator = this.marker.getElement()?.querySelector('.vehicle-svg-rotator');
+            const rotator = this.marker.getElement()?.querySelector('.vehicle-rotator');
             if (rotator) {
                 rotator.style.transform = `rotate(${bearing}deg)`;
             }
@@ -136,143 +136,151 @@ class VehicleNavigator {
     /**
      * Start animation along road coordinates
      */
-    start(roadCoordinates, onComplete, onProgress) {
-        if (!roadCoordinates || roadCoordinates.length < 2) return;
-
+    start(coordinates, onComplete, onProgress) {
         this.reset();
-        this.coordinates = roadCoordinates;
+        if (!coordinates || coordinates.length < 2) return;
+
+        this.coordinates = coordinates;
         this.onCompleteCallback = onComplete;
         this.onProgressCallback = onProgress;
+
         this.currentSegmentIndex = 0;
         this.segmentProgress = 0;
         this.isPlaying = true;
         this.isPaused = false;
+        this.lastTimestamp = null;
 
-        const p0 = this.coordinates[0];
-        const p1 = this.coordinates[1];
-        const initialBearing = VehicleNavigator.calculateBearing(p0[0], p0[1], p1[0], p1[1]);
+        // Position at origin
+        const start = coordinates[0];
+        const next = coordinates[1];
+        const initialBearing = VehicleNavigator.calculateBearing(start[0], start[1], next[0], next[1]);
+        this._ensureMarker(start[0], start[1], initialBearing);
 
-        this._ensureMarker(p0[0], p0[1], initialBearing);
-        this.lastTimestamp = performance.now();
-        this.animationFrameId = requestAnimationFrame(this._animate.bind(this));
+        if (this.onTimelineEvent) {
+            this.onTimelineEvent('Vehicle started navigation along route geometry');
+        }
+
+        if (this.followVehicle) {
+            this.map.panTo([start[0], start[1]], { animate: true });
+        }
+
+        this.animationFrameId = requestAnimationFrame((ts) => this._animationLoop(ts));
     }
 
     /**
-     * Core animation loop using requestAnimationFrame
+     * 60fps Animation Loop with distance-proportional movement
      */
-    _animate(timestamp) {
+    _animationLoop(timestamp) {
         if (!this.isPlaying || this.isPaused) return;
 
-        const deltaMs = Math.min(100, timestamp - (this.lastTimestamp || timestamp));
+        if (!this.lastTimestamp) {
+            this.lastTimestamp = timestamp;
+            this.animationFrameId = requestAnimationFrame((ts) => this._animationLoop(ts));
+            return;
+        }
+
+        const deltaSeconds = (timestamp - this.lastTimestamp) / 1000;
         this.lastTimestamp = timestamp;
 
         if (this.currentSegmentIndex >= this.coordinates.length - 1) {
-            // Reached Destination
-            this.isPlaying = false;
-            const finalPoint = this.coordinates[this.coordinates.length - 1];
-            this._ensureMarker(finalPoint[0], finalPoint[1], this.currentBearing);
-
-            if (this.onCompleteCallback) {
-                this.onCompleteCallback();
-            }
+            this._finish();
             return;
         }
 
         const p1 = this.coordinates[this.currentSegmentIndex];
         const p2 = this.coordinates[this.currentSegmentIndex + 1];
 
-        // Segment distance in km
-        const segDistKm = VehicleNavigator.calculateDistance(p1[0], p1[1], p2[0], p2[1]);
+        const segDistanceKm = VehicleNavigator.calculateDistance(p1[0], p1[1], p2[0], p2[1]);
+        const speedKmh = this.baseSpeedKmh * this.speedMultiplier;
+        const segmentDurationSec = Math.max(0.12, (segDistanceKm / speedKmh) * 3600);
 
-        // Duration calculation: time = distance / velocity
-        // Effective velocity in km/h = baseSpeedKmH * speedFactor
-        // Minimum segment duration 200ms to keep motion buttery smooth
-        const speedKmh = Math.max(10, this.baseSpeedKmH * this.speedFactor);
-        const segmentDurationMs = Math.max(150, (segDistKm / speedKmh) * 3600 * 1000);
-
-        // Advance progress
-        this.segmentProgress += deltaMs / segmentDurationMs;
+        this.segmentProgress += deltaSeconds / segmentDurationSec;
 
         if (this.segmentProgress >= 1.0) {
-            this.segmentProgress = 0;
             this.currentSegmentIndex++;
+            this.segmentProgress = 0;
+
+            if (this.currentSegmentIndex >= this.coordinates.length - 1) {
+                const end = this.coordinates[this.coordinates.length - 1];
+                this._ensureMarker(end[0], end[1], this.currentBearing);
+                this._finish();
+                return;
+            }
         }
 
         // Interpolate position along current segment
-        const safeProgress = Math.min(1.0, this.segmentProgress);
-        const currentLat = p1[0] + (p2[0] - p1[0]) * safeProgress;
-        const currentLng = p1[1] + (p2[1] - p1[1]) * safeProgress;
+        const curP1 = this.coordinates[this.currentSegmentIndex];
+        const curP2 = this.coordinates[this.currentSegmentIndex + 1];
 
-        // Calculate heading bearing
-        const targetBearing = VehicleNavigator.calculateBearing(p1[0], p1[1], p2[0], p2[1]);
+        const curLat = curP1[0] + (curP2[0] - curP1[0]) * this.segmentProgress;
+        const curLng = curP1[1] + (curP2[1] - curP1[1]) * this.segmentProgress;
+        const bearing = VehicleNavigator.calculateBearing(curP1[0], curP1[1], curP2[0], curP2[1]);
 
-        // Smooth bearing transition
-        const smoothBearing = this._interpolateAngle(this.currentBearing, targetBearing, 0.25);
+        this._ensureMarker(curLat, curLng, bearing);
 
-        this._ensureMarker(currentLat, currentLng, smoothBearing);
-
-        // Follow vehicle mode: smooth map pan
-        if (this.followVehicle) {
-            this.map.panTo([currentLat, currentLng], { animate: true, duration: 0.1 });
-        }
+        // Calculate total route progress percentage
+        const totalSegments = this.coordinates.length - 1;
+        const rawProgress = (this.currentSegmentIndex + this.segmentProgress) / totalSegments;
+        const progressPercent = Math.min(100, Math.max(0, Math.round(rawProgress * 100)));
 
         if (this.onProgressCallback) {
-            this.onProgressCallback({
-                segmentIndex: this.currentSegmentIndex,
-                totalSegments: this.coordinates.length - 1,
-                lat: currentLat,
-                lng: currentLng,
-                bearing: smoothBearing
-            });
+            this.onProgressCallback(progressPercent, { lat: curLat, lng: curLng });
         }
 
-        this.animationFrameId = requestAnimationFrame(this._animate.bind(this));
+        // Smooth follow camera
+        if (this.followVehicle && Math.random() < 0.2) {
+            this.map.panTo([curLat, curLng], { animate: true, duration: 0.2 });
+        }
+
+        this.animationFrameId = requestAnimationFrame((ts) => this._animationLoop(ts));
     }
 
-    /**
-     * Shortest rotational angle interpolation
-     */
-    _interpolateAngle(current, target, factor) {
-        let diff = (target - current) % 360;
-        if (diff < -180) diff += 360;
-        if (diff > 180) diff -= 360;
-        return (current + diff * factor + 360) % 360;
+    _finish() {
+        this.isPlaying = false;
+        this.isPaused = false;
+        this.segmentProgress = 1.0;
+
+        if (this.onProgressCallback) {
+            this.onProgressCallback(100, this.currentPosition);
+        }
+
+        if (this.onTimelineEvent) {
+            this.onTimelineEvent('Vehicle reached destination successfully');
+        }
+
+        if (this.onCompleteCallback) {
+            this.onCompleteCallback();
+        }
     }
 
-    /**
-     * Pause animation
-     */
     pause() {
-        if (!this.isPlaying || this.isPaused) return;
+        if (!this.isPlaying) return;
         this.isPaused = true;
+        this.lastTimestamp = null;
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
             this.animationFrameId = null;
         }
     }
 
-    /**
-     * Resume paused animation
-     */
     resume() {
         if (!this.isPlaying || !this.isPaused) return;
         this.isPaused = false;
-        this.lastTimestamp = performance.now();
-        this.animationFrameId = requestAnimationFrame(this._animate.bind(this));
+        this.lastTimestamp = null;
+        this.animationFrameId = requestAnimationFrame((ts) => this._animationLoop(ts));
     }
 
-    /**
-     * Stop and reset vehicle to start or remove marker
-     */
     reset() {
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
         this.isPlaying = false;
         this.isPaused = false;
         this.currentSegmentIndex = 0;
         this.segmentProgress = 0;
-        if (this.animationFrameId) {
-            cancelAnimationFrame(this.animationFrameId);
-            this.animationFrameId = null;
-        }
+        this.lastTimestamp = null;
+
         if (this.marker) {
             this.map.removeLayer(this.marker);
             this.marker = null;
@@ -280,10 +288,26 @@ class VehicleNavigator {
         this.currentPosition = null;
     }
 
+    replay() {
+        if (this.coordinates && this.coordinates.length >= 2) {
+            this.start(this.coordinates, this.onCompleteCallback, this.onProgressCallback);
+        }
+    }
+
+    setSpeed(speedVal) {
+        this.speedMultiplier = parseFloat(speedVal) || 1.0;
+    }
+
+    setFollowVehicle(enabled) {
+        this.followVehicle = Boolean(enabled);
+        if (this.followVehicle && this.currentPosition) {
+            this.map.panTo([this.currentPosition.lat, this.currentPosition.lng], { animate: true });
+        }
+    }
+
     /**
-     * Intelligent dynamic rerouting:
-     * When Dijkstra finds a new shortest route mid-trip, find the closest forward
-     * point on the new road coordinates and continue animating without teleporting.
+     * Seamless mid-route update (Dynamic Reroute):
+     * Connects current vehicle location to the nearest point on the newly calculated path!
      */
     updateRouteCoordinates(newCoordinates) {
         if (!newCoordinates || newCoordinates.length < 2) return;
@@ -293,40 +317,34 @@ class VehicleNavigator {
             return;
         }
 
-        const currLat = this.currentPosition.lat;
-        const currLng = this.currentPosition.lng;
-
-        // Find nearest point on the new route
-        let nearestIdx = 0;
-        let minDistance = Infinity;
+        // Find nearest coordinate in the new route ahead
+        let bestIdx = 0;
+        let minDist = Infinity;
 
         for (let i = 0; i < newCoordinates.length; i++) {
             const dist = VehicleNavigator.calculateDistance(
-                currLat, currLng,
+                this.currentPosition.lat, this.currentPosition.lng,
                 newCoordinates[i][0], newCoordinates[i][1]
             );
-            if (dist < minDistance) {
-                minDistance = dist;
-                nearestIdx = i;
+            if (dist < minDist) {
+                minDist = dist;
+                bestIdx = i;
             }
         }
 
-        // Splice route from current position forward
-        const remainingRoute = [
-            [currLat, currLng],
-            ...newCoordinates.slice(nearestIdx)
+        // Splice current vehicle position followed by remaining path
+        const remainingCoords = [
+            [this.currentPosition.lat, this.currentPosition.lng],
+            ...newCoordinates.slice(bestIdx)
         ];
 
-        this.coordinates = remainingRoute;
+        this.coordinates = remainingCoords;
         this.currentSegmentIndex = 0;
         this.segmentProgress = 0;
-    }
+        this.lastTimestamp = null;
 
-    setSpeed(speedFactor) {
-        this.speedFactor = parseFloat(speedFactor) || 1.0;
-    }
-
-    setFollowVehicle(enabled) {
-        this.followVehicle = Boolean(enabled);
+        if (this.onTimelineEvent) {
+            this.onTimelineEvent('Vehicle dynamically rerouted onto new optimal path');
+        }
     }
 }

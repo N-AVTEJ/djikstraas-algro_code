@@ -1,13 +1,13 @@
 /**
  * ============================================================================
- * ROUTING CONTROLLER & DUAL-MODE COMPARATOR (js/routing.js)
+ * ROUTING CONTROLLER & DUAL-MODE ROUTE COMPARATOR (js/routing.js)
  * ============================================================================
  *
  * Responsibilities:
- * 1. Manages "Normal / Casual Route" (shortest geographical baseline road path).
- * 2. Manages "Dijkstra Fastest Route" (travel time-optimized route with live signals & speeds).
- * 3. Generates side-by-side comparison metrics (Time Saved, Distance Diff).
- * 4. Generates "Why Did Dijkstra Choose This Route?" explainability insights.
+ * 1. Coordinates Normal Route and Dijkstra Fastest Route on the SAME road network.
+ * 2. Generates genuine comparison statistics (Time Saved, Distance Diff).
+ * 3. Formulates algorithmic explainability points ("Why Did Dijkstra Choose This Route?").
+ * 4. Synchronizes calculated routes with navigationState.
  */
 
 class RoutingManager {
@@ -19,23 +19,40 @@ class RoutingManager {
     }
 
     /**
-     * Compute both Normal Route and Dijkstra Fastest Route
+     * Compute both routes and update single authoritative navigationState
      */
     computeRoutes(startNodeId, targetNodeId, recordSteps = false) {
+        // Section 4: Strict validation before running routing algorithms
+        const validation = navigationState.validateNavigationState(this.graph.roadNetwork);
+        if (!validation.valid) {
+            return {
+                success: false,
+                error: validation.error,
+                normal: null,
+                dijkstra: null,
+                comparison: null
+            };
+        }
+
         // 1. Compute Normal Route (Geographic distance baseline)
         this.normalRoute = DijkstraRouter.findPath(this.graph, startNodeId, targetNodeId, {
             mode: 'normal',
             recordSteps: false
         });
 
-        // 2. Compute Dijkstra Fastest Route (Travel-time optimized)
+        // 2. Compute Dijkstra Fastest Route (Travel-time and traffic optimized)
         this.dijkstraRoute = DijkstraRouter.findPath(this.graph, startNodeId, targetNodeId, {
-            mode: 'fastest',
+            mode: 'dijkstra',
             recordSteps
         });
 
+        // Register with authoritative navigationState
+        navigationState.setRoutes(this.normalRoute, this.dijkstraRoute, this.activeMode);
+
         const comparison = this.generateComparison();
+
         return {
+            success: this.dijkstraRoute.success || this.normalRoute.success,
             normal: this.normalRoute,
             dijkstra: this.dijkstraRoute,
             comparison
@@ -43,46 +60,50 @@ class RoutingManager {
     }
 
     /**
-     * Compare Normal Route vs Dijkstra Route
+     * Section 23: Genuine Route Comparison
      */
     generateComparison() {
         if (!this.normalRoute || !this.dijkstraRoute) return null;
         if (!this.normalRoute.success || !this.dijkstraRoute.success) {
             return {
                 valid: false,
-                reason: this.dijkstraRoute.error || this.normalRoute.error || 'Route unavailable'
+                reason: this.dijkstraRoute.error || this.normalRoute.error || 'Route currently unavailable'
             };
         }
 
         const normTime = this.normalRoute.estimatedTimeMin;
         const dijkTime = this.dijkstraRoute.estimatedTimeMin;
-        const normDist = this.normalRoute.totalDistanceKm;
-        const dijkDist = this.dijkstraRoute.totalDistanceKm;
+        const normDist = this.normalRoute.distanceKm;
+        const dijkDist = this.dijkstraRoute.distanceKm;
 
         const timeSaved = Math.max(0, Number((normTime - dijkTime).toFixed(1)));
         const distDiff = Number((dijkDist - normDist).toFixed(2));
 
         const redAvoided = Math.max(0, this.normalRoute.redLightCount - this.dijkstraRoute.redLightCount);
+        const yellowAvoided = Math.max(0, this.normalRoute.yellowLightCount - this.dijkstraRoute.yellowLightCount);
         const shortcutsUsed = this.dijkstraRoute.shortcutCount;
 
-        // Formulate clear, educational explainability points
+        // Educational explainability points
         const reasons = [];
 
         if (redAvoided > 0) {
-            reasons.push(`Avoided ${redAvoided} red traffic light delay${redAvoided > 1 ? 's' : ''}`);
+            reasons.push(`Bypassed ${redAvoided} RED traffic signal delay${redAvoided > 1 ? 's' : ''} (+${redAvoided * 30}s delay avoided)`);
+        }
+        if (yellowAvoided > 0) {
+            reasons.push(`Avoided ${yellowAvoided} YELLOW signal cautionary slow-down${yellowAvoided > 1 ? 's' : ''}`);
         }
         if (shortcutsUsed > 0) {
-            reasons.push(`Utilized ${shortcutsUsed} express shortcut bypass${shortcutsUsed > 1 ? 'es' : ''}`);
+            reasons.push(`Leveraged ${shortcutsUsed} Express Bypass Corridor (65 km/h high-speed transit)`);
         }
         if (timeSaved > 0) {
-            reasons.push(`${timeSaved} minutes faster simulated travel time`);
+            reasons.push(`Saved ${timeSaved} minutes in total estimated travel time`);
         }
         if (distDiff > 0 && timeSaved > 0) {
-            reasons.push(`Diverted +${distDiff} km longer in distance to gain high-speed roads and skip delays`);
+            reasons.push(`Took a +${distDiff} km geographically longer road detour to save overall trip time`);
         } else if (distDiff < 0) {
-            reasons.push(`${Math.abs(distDiff)} km shorter road path`);
+            reasons.push(`Route is both ${Math.abs(distDiff)} km shorter and faster`);
         } else if (timeSaved === 0 && distDiff === 0) {
-            reasons.push('Normal route is already optimal under current traffic conditions');
+            reasons.push('Normal route is currently optimal under existing road & traffic conditions');
         }
 
         return {
@@ -98,4 +119,11 @@ class RoutingManager {
             reasons
         };
     }
+}
+
+if (typeof window !== 'undefined') {
+    window.RoutingManager = RoutingManager;
+}
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = RoutingManager;
 }

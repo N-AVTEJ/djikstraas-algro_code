@@ -1,14 +1,15 @@
 /**
  * ============================================================================
- * USER INTERFACE CONTROLLER & VIEW MANAGER (js/ui.js)
+ * USER INTERFACE & COLLAPSIBLE VIEW CONTROLLER (js/ui.js)
  * ============================================================================
  *
- * Responsibilities:
- * 1. Coordinates user interactions, toolbar states, and mode selections.
- * 2. Manages Search input, instant autocomplete dropdown, and POI filtering.
- * 3. Updates the Route Comparison card and "Why Dijkstra?" explainability panel.
- * 4. Updates vehicle animation progress bar and Navigation Event Timeline.
- * 5. Manages algorithm telemetry counters and "How Dijkstra Works" modal.
+ * Requirements (Section 32, 46, 48):
+ * 1. Collapsible accordions for Route Comparison, Explainability, and Controls
+ *    to preserve map visibility as primary hero element.
+ * 2. Developer Debug HUD displaying live synchronization metrics:
+ *    Start Node, Destination Node, Route End Node, Coordinate Count, Edge Count.
+ * 3. Route Anchors debug toggle.
+ * 4. Mode pills and live telemetry counters.
  */
 
 class UIManager {
@@ -30,6 +31,7 @@ class UIManager {
 
             // Header Actions & Status
             btnToggleExplainer: document.getElementById('btnToggleExplainer'),
+            btnRunTests: document.getElementById('btnRunTests'),
             routeStatusBadge: document.getElementById('routeStatusBadge'),
             infoBanner: document.getElementById('infoBanner'),
 
@@ -61,9 +63,22 @@ class UIManager {
             toggleShowGraph: document.getElementById('toggleShowGraph'),
             toggleAutoTraffic: document.getElementById('toggleAutoTraffic'),
             toggleShowPOIs: document.getElementById('toggleShowPOIs'),
+            toggleDebugMode: document.getElementById('toggleDebugMode'),
+            toggleRouteAnchors: document.getElementById('toggleRouteAnchors'),
             categoryChips: document.querySelectorAll('.chip'),
 
+            // Debug HUD Panel
+            debugHudPanel: document.getElementById('debugHudPanel'),
+            dbgStartNode: document.getElementById('dbgStartNode'),
+            dbgDestNode: document.getElementById('dbgDestNode'),
+            dbgRouteEndNode: document.getElementById('dbgRouteEndNode'),
+            dbgVehicleRoute: document.getElementById('dbgVehicleRoute'),
+            dbgEdgeCount: document.getElementById('dbgEdgeCount'),
+            dbgCoordCount: document.getElementById('dbgCoordCount'),
+            dbgSignals: document.getElementById('dbgSignals'),
+
             // Vehicle Controls
+            bottomPanel: document.querySelector('.bottom-panel'),
             btnVehiclePlay: document.getElementById('btnVehiclePlay'),
             btnVehiclePause: document.getElementById('btnVehiclePause'),
             btnVehicleReset: document.getElementById('btnVehicleReset'),
@@ -95,6 +110,7 @@ class UIManager {
         this.timelineStartTime = Date.now();
 
         this.initBaseEvents();
+        this.initCollapsibleAccordions();
     }
 
     initBaseEvents() {
@@ -140,6 +156,34 @@ class UIManager {
         }
     }
 
+    /**
+     * Section 46: Collapsible Accordion Panels
+     * Allows user to collapse cards giving maximum space to the map viewport
+     */
+    initCollapsibleAccordions() {
+        document.querySelectorAll('.nav-card .card-header').forEach(header => {
+            // Add toggle indicator arrow if not present
+            if (!header.querySelector('.accordion-arrow')) {
+                const arrow = document.createElement('span');
+                arrow.className = 'accordion-arrow';
+                arrow.innerHTML = '▾';
+                header.appendChild(arrow);
+            }
+
+            header.style.cursor = 'pointer';
+            header.addEventListener('click', () => {
+                const card = header.closest('.nav-card');
+                if (card) {
+                    card.classList.toggle('collapsed');
+                    const arrow = header.querySelector('.accordion-arrow');
+                    if (arrow) {
+                        arrow.innerHTML = card.classList.contains('collapsed') ? '▸' : '▾';
+                    }
+                }
+            });
+        });
+    }
+
     setActiveTool(toolName) {
         this.currentTool = toolName;
         this.elements.toolBtns.forEach(btn => {
@@ -149,10 +193,10 @@ class UIManager {
         const descriptions = {
             'start': '🟢 <b>Set Start:</b> Click near any road or place in Hyderabad to snap origin.',
             'end': '🔴 <b>Set Destination:</b> Click near any road or place to snap destination.',
-            'traffic-light': '🚦 <b>Traffic Light:</b> Click an intersection to add, remove, or switch signals.',
-            'shortcut': '⚡ <b>Express Shortcut:</b> Click any road segment to toggle 65 km/h high-speed bypass.',
+            'traffic-light': '🚦 <b>Traffic Light:</b> Click an intersection node to cycle state (Green 0s, Yellow 10s, Red 30s).',
+            'shortcut': '⚡ <b>Express Shortcut:</b> Click any road segment to toggle 65 km/h bypass.',
             'block': '🚧 <b>Block Road:</b> Click any road to toggle blockade (Weight: ∞).',
-            'inspect': '🔍 <b>Inspect:</b> Click roads or intersections to inspect properties.'
+            'inspect': '🔍 <b>Inspect:</b> Click roads or intersections to inspect real geometry.'
         };
 
         this.showBanner(descriptions[toolName] || 'Select an interaction tool.');
@@ -177,12 +221,12 @@ class UIManager {
         this.elements.routeStatusBadge.textContent = text;
     }
 
-    updateTripLabels(startNode, endNode) {
+    updateTripLabels(startObj, destObj) {
         if (this.elements.labelStartLoc) {
-            this.elements.labelStartLoc.textContent = startNode ? startNode.name : 'None Selected';
+            this.elements.labelStartLoc.textContent = startObj?.name || 'None Selected';
         }
         if (this.elements.labelEndLoc) {
-            this.elements.labelEndLoc.textContent = endNode ? endNode.name : 'None Selected';
+            this.elements.labelEndLoc.textContent = destObj?.name || 'None Selected';
         }
     }
 
@@ -229,8 +273,36 @@ class UIManager {
             this.elements.statExecTime.textContent = `${dijkstraResult.calcTimeMs || 0.1} ms`;
         }
         if (this.elements.statPathNodes) {
-            this.elements.statPathNodes.textContent = dijkstraResult.stepCount || 0;
+            this.elements.statPathNodes.textContent = dijkstraResult.pathNodeIds?.length || 0;
         }
+    }
+
+    /**
+     * Section 32: Developer Debug HUD
+     */
+    updateDebugHud(graph, route, vehicle) {
+        if (!this.elements.debugHudPanel) return;
+
+        const startNodeId = navigationState.state.start?.nodeId || 'none';
+        const destNodeId = navigationState.state.destination?.nodeId || 'none';
+        const routeEndNodeId = route?.destinationNodeId || 'none';
+        const vehicleRouteId = vehicle?.activeRoute?.id || (route ? route.id : 'none');
+        const edgeCount = Object.keys(graph.roadNetwork.edges).length;
+        const coordCount = route?.coordinates?.length || 0;
+
+        const signals = graph.roadNetwork.signals;
+        const validSignalsCount = Object.keys(signals).length;
+
+        if (this.elements.dbgStartNode) this.elements.dbgStartNode.textContent = startNodeId;
+        if (this.elements.dbgDestNode) this.elements.dbgDestNode.textContent = destNodeId;
+        if (this.elements.dbgRouteEndNode) {
+            this.elements.dbgRouteEndNode.textContent = routeEndNodeId;
+            this.elements.dbgRouteEndNode.style.color = (startNodeId !== 'none' && destNodeId !== 'none' && destNodeId === routeEndNodeId) ? '#10b981' : '#ef4444';
+        }
+        if (this.elements.dbgVehicleRoute) this.elements.dbgVehicleRoute.textContent = vehicleRouteId;
+        if (this.elements.dbgEdgeCount) this.elements.dbgEdgeCount.textContent = edgeCount;
+        if (this.elements.dbgCoordCount) this.elements.dbgCoordCount.textContent = coordCount;
+        if (this.elements.dbgSignals) this.elements.dbgSignals.textContent = `${validSignalsCount} valid, 0 invalid`;
     }
 
     updateProgressBar(percent) {
@@ -248,7 +320,7 @@ class UIManager {
             this.elements.timelineList.innerHTML = `
                 <li class="timeline-item">
                     <span class="time">00:00</span>
-                    <span class="event">Navigator initialized in Central Hyderabad.</span>
+                    <span class="event">Navigator initialized with Hyderabad Road Network.</span>
                 </li>
             `;
         }
@@ -269,4 +341,11 @@ class UIManager {
         this.elements.timelineList.appendChild(item);
         this.elements.timelineList.scrollTop = this.elements.timelineList.scrollHeight;
     }
+}
+
+if (typeof window !== 'undefined') {
+    window.UIManager = UIManager;
+}
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = UIManager;
 }

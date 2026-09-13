@@ -64,8 +64,8 @@
     "name": "Paradise Biryani (Secunderabad Flagship)",
     "category": "Restaurant",
     "icon": "🍴",
-    "lat": 17.4418,
-    "lng": 78.4872,
+    "lat": 17.4422,
+    "lng": 78.4878,
     "nearestNode": "paradise",
     "description": "World-renowned Hyderabadi Biryani destination established in 1953."
   },
@@ -74,8 +74,8 @@
     "name": "Eat Street Necklace Road",
     "category": "Restaurant",
     "icon": "🍴",
-    "lat": 17.4270,
-    "lng": 78.4650,
+    "lat": 17.4264,
+    "lng": 78.4623,
     "nearestNode": "necklace_mid",
     "description": "Open-air waterfront culinary food court along PVNR Marg."
   },
@@ -94,10 +94,10 @@
     "name": "IndianOil Fuel Station Tank Bund",
     "category": "Fuel",
     "icon": "⛽",
-    "lat": 17.4180,
-    "lng": 78.4770,
+    "lat": 17.4145,
+    "lng": 78.4795,
     "nearestNode": "tankbund_south",
-    "description": "Promenade fuel station on Lower Tank Bund."
+    "description": "Promenade fuel station on Tank Bund."
   },
   {
     "id": "poi_metr_1",
@@ -114,8 +114,8 @@
     "name": "Ameerpet Metro Station (Red & Blue Lines)",
     "category": "Metro",
     "icon": "🚇",
-    "lat": 17.4375,
-    "lng": 78.4483,
+    "lat": 17.4360,
+    "lng": 78.4554,
     "nearestNode": "ameerpet",
     "description": "Largest dual-level junction metro station in Hyderabad."
   },
@@ -124,8 +124,8 @@
     "name": "Paradise Metro Station (Blue Line)",
     "category": "Metro",
     "icon": "🚇",
-    "lat": 17.4410,
-    "lng": 78.4865,
+    "lat": 17.4420,
+    "lng": 78.4870,
     "nearestNode": "paradise",
     "description": "Rapid transit station connecting Secunderabad and Hitec City."
   },
@@ -133,50 +133,50 @@
     "id": "poi_shop_1",
     "name": "Hyderabad Central Mall Punjagutta",
     "category": "Shopping",
-    "icon": "🛍",
-    "lat": 17.4284,
-    "lng": 78.4526,
+    "icon": "🛍️",
+    "lat": 17.4270,
+    "lng": 78.4523,
     "nearestNode": "punjagutta",
-    "description": "Flagship multi-story shopping mall and lifestyle retail hub."
+    "description": "Flagship multi-story shopping mall and retail hub."
   },
   {
     "id": "poi_land_1",
     "name": "BR Ambedkar Telangana State Secretariat",
     "category": "Landmark",
     "icon": "📍",
-    "lat": 17.4128,
-    "lng": 78.4715,
+    "lat": 17.4089,
+    "lng": 78.4755,
     "nearestNode": "secretariat",
     "description": "Grand state administration headquarters on lakeside NTR Marg."
   },
   {
     "id": "poi_land_2",
-    "name": "Hussain Sagar Lake & Buddha Statue",
+    "name": "Tank Bund Road Promenade (Buddha View)",
     "category": "Landmark",
     "icon": "📍",
-    "lat": 17.4230,
-    "lng": 78.4782,
+    "lat": 17.4215,
+    "lng": 78.4845,
     "nearestNode": "tankbund_mid",
-    "description": "Heart-shaped historic lake built in 1563 with 18m monolithic statue."
+    "description": "Scenic eastern promenade overlooking historic Hussain Sagar."
   },
   {
     "id": "poi_land_3",
     "name": "Sanjeevaiah Park Promenade",
     "category": "Landmark",
     "icon": "📍",
-    "lat": 17.4350,
-    "lng": 78.4720,
+    "lat": 17.4374,
+    "lng": 78.4691,
     "nearestNode": "sanjeevaiah",
-    "description": "92-acre lush public green park along northern shore."
+    "description": "Lush public waterfront park along northern shore."
   },
   {
     "id": "poi_land_4",
     "name": "Lumbini Park & Laser Show",
     "category": "Landmark",
     "icon": "📍",
-    "lat": 17.4145,
-    "lng": 78.4750,
+    "lat": 17.4140,
+    "lng": 78.4785,
     "nearestNode": "tankbund_south",
-    "description": "Popular waterfront urban park adjacent to Secretariat."
+    "description": "Waterfront urban park adjacent to Secretariat and Tank Bund."
   }
 ]

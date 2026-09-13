@@ -1,649 +1,532 @@
 /**
  * ============================================================================
- * GRAPH DATA STRUCTURE & ROAD GEOMETRY ENGINE (js/graph.js)
+ * AUTHORITATIVE ROAD NETWORK GRAPH & GEOMETRY ENGINE (js/graph.js)
  * ============================================================================
  *
- * Academic & Architectural Context:
- * Represents the topological road network of Hyderabad, India.
- * Acts as the Single Source of Truth for:
- * 1. Geographic intersections (Nodes: lat, lng, traffic lights, obstacles)
- * 2. Multi-point Road Segments (Edges: exact road coordinates, distance, speed, type)
- * 3. Realistic travel-time and distance-based cost models
- * 4. Nearest-road / Nearest-node snapping algorithms
+ * Engineering Principles:
+ * 1. THE ROAD NETWORK IS THE SINGLE SOURCE OF TRUTH.
+ * 2. Nodes represent verified road intersections (connectedEdges >= 1).
+ * 3. Edges represent real multi-point road curves strictly following OSM geometry.
+ * 4. Coordinate standard is Leaflet [lat, lng].
+ * 5. Directional reversal is strictly non-mutating: [...edge.coordinates].reverse().
+ * 6. Cost models:
+ *    - Normal Route: Distance in meters (physical road distance)
+ *    - Dijkstra Fastest: Travel time in seconds with live traffic signal delays:
+ *        travelTime = roadTravelTime + signalDelay
+ *        Green = 0s, Yellow = 10s, Red = 30s.
  */
 
 class CityRoadGraph {
     constructor() {
-        // Map<string, Node>
-        this.nodes = new Map();
-        // Map<string, Edge>
-        this.edges = new Map();
-        // Map<string, Edge[]> (outgoing adjacency list)
-        this.adjacencyList = new Map();
-
-        // Initialize with realistic Central Hyderabad road network
-        this.initializeDefaultNetwork();
-    }
-
-    /**
-     * Haversine geographic distance in Kilometers between two lat/lng pairs
-     */
-    static calculateHaversine(lat1, lon1, lat2, lon2) {
-        const R = 6371; // Earth radius in km
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a =
-            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    }
-
-    /**
-     * Calculate true polyline length by summing distance between consecutive coordinates
-     */
-    static calculatePolylineDistance(coordinates) {
-        if (!coordinates || coordinates.length < 2) return 0;
-        let total = 0;
-        for (let i = 0; i < coordinates.length - 1; i++) {
-            total += CityRoadGraph.calculateHaversine(
-                coordinates[i][0], coordinates[i][1],
-                coordinates[i + 1][0], coordinates[i + 1][1]
-            );
-        }
-        return total;
-    }
-
-    /**
-     * Add an Intersection Node to the Graph
-     */
-    addNode(id, name, lat, lng, options = {}) {
-        const node = {
-            id,
-            name: name || id,
-            lat,
-            lng,
-            type: options.type || 'intersection',
-            blocked: options.blocked || false,
-            trafficLight: options.trafficLight || false,
-            trafficState: options.trafficState || 'green', // 'green', 'yellow', 'red'
-            customDelay: options.customDelay || 0
+        // Authoritative Road Network Model
+        this.roadNetwork = {
+            nodes: {},
+            edges: {},
+            signals: {}
         };
 
-        this.nodes.set(id, node);
-        if (!this.adjacencyList.has(id)) {
-            this.adjacencyList.set(id, []);
-        }
-        return node;
+        // Adjacency Map: nodeId -> array of directed edge descriptors
+        // { id, from, to, name, coordinates, distanceMeters, speedKmh, blocked, shortcut, isReverse }
+        this.adjacencyMap = new Map();
+
+        // Initialize with real OSM Hyderabad road network
+        this.loadDefaultNetwork();
     }
 
     /**
-     * Add a bidirectional Road Edge with intermediate road geometry coordinates
+     * Load authoritative Central Hyderabad Road Network
      */
-    addEdge(from, to, coordinates, options = {}) {
-        const fromNode = this.nodes.get(from);
-        const toNode = this.nodes.get(to);
+    loadDefaultNetwork() {
+        this.roadNetwork = {
+            nodes: {},
+            edges: {},
+            signals: {}
+        };
+        this.adjacencyMap.clear();
 
-        if (!fromNode || !toNode) {
-            console.warn(`Cannot create edge from '${from}' to '${to}': Missing node.`);
-            return null;
-        }
+        // 1. Authoritative Nodes (Real Hyderabad road intersections)
+        const nodesData = [
+            { id: "lakdikapul", name: "Lakdikapul Junction", lat: 17.4042, lng: 78.4633, type: "intersection" },
+            { id: "nampally", name: "Nampally Station", lat: 17.3921, lng: 78.4716, type: "intersection" },
+            { id: "khairatabad", name: "Khairatabad Junction", lat: 17.4116, lng: 78.4611, type: "intersection" },
+            { id: "necklace_south", name: "PVNR Marg South (IMAX Gate)", lat: 17.4157, lng: 78.4660, type: "intersection" },
+            { id: "secretariat", name: "Telangana Secretariat Circle", lat: 17.4089, lng: 78.4755, type: "intersection", trafficSignalId: "sig_secretariat" },
+            { id: "tankbund_south", name: "Tank Bund South (Lumbini Park)", lat: 17.4145, lng: 78.4795, type: "intersection", trafficSignalId: "sig_tankbund_south" },
+            { id: "lower_tankbund", name: "Lower Tank Bund Entry", lat: 17.4128, lng: 78.4784, type: "intersection" },
+            { id: "tankbund_mid", name: "Tank Bund Road (Promenade Mid)", lat: 17.4215, lng: 78.4845, type: "intersection" },
+            { id: "ranigunj", name: "Ranigunj / Tank Bund North", lat: 17.4365, lng: 78.4842, type: "intersection" },
+            { id: "kavadiguda", name: "Kavadiguda Crossroads", lat: 17.4225, lng: 78.4866, type: "intersection" },
+            { id: "necklace_mid", name: "PVNR Marg (People's Plaza)", lat: 17.4264, lng: 78.4623, type: "intersection" },
+            { id: "jalavihar", name: "PVNR Marg (Jalavihar)", lat: 17.4305, lng: 78.4629, type: "intersection" },
+            { id: "sanjeevaiah", name: "Sanjeevaiah Park Station", lat: 17.4374, lng: 78.4691, type: "intersection" },
+            { id: "raj_bhavan", name: "Raj Bhavan Road", lat: 17.4190, lng: 78.4585, type: "intersection" },
+            { id: "somajiguda", name: "Somajiguda Circle", lat: 17.4257, lng: 78.4530, type: "intersection" },
+            { id: "punjagutta", name: "Punjagutta Central Circle", lat: 17.4270, lng: 78.4523, type: "intersection", trafficSignalId: "sig_punjagutta" },
+            { id: "ameerpet", name: "Ameerpet Crossroads", lat: 17.4360, lng: 78.4554, type: "intersection" },
+            { id: "begumpet", name: "Begumpet Flyover Junction", lat: 17.4420, lng: 78.4580, type: "intersection", trafficSignalId: "sig_begumpet" },
+            { id: "minister_road", name: "Minister Road Junction", lat: 17.4411, lng: 78.4789, type: "intersection" },
+            { id: "paradise", name: "Paradise Circle", lat: 17.4422, lng: 78.4878, type: "intersection" }
+        ];
 
-        let coords = coordinates;
-        if (!coords || coords.length < 2) {
-            coords = [[fromNode.lat, fromNode.lng], [toNode.lat, toNode.lng]];
-        }
+        nodesData.forEach(n => {
+            this.roadNetwork.nodes[n.id] = {
+                id: n.id,
+                name: n.name,
+                lat: n.lat,
+                lng: n.lng,
+                type: n.type || "intersection",
+                connectedEdges: [],
+                trafficSignalId: n.trafficSignalId || null
+            };
+            this.adjacencyMap.set(n.id, []);
+        });
 
-        const distance = options.distance !== undefined 
-            ? options.distance 
-            : CityRoadGraph.calculatePolylineDistance(coords);
+        // 2. Authoritative Edges with True Intermediate OSM Curves
+        const edgesData = [
+            {
+                id: "lakdikapul--khairatabad", from: "lakdikapul", to: "khairatabad",
+                name: "Khairatabad Road", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4042, 78.4633], [17.4055, 78.4638], [17.4068, 78.4618], [17.4085, 78.4614], [17.4116, 78.4611]
+                ]
+            },
+            {
+                id: "lakdikapul--nampally", from: "lakdikapul", to: "nampally",
+                name: "Nampally Station Road", roadType: "normal", speedKmh: 40,
+                coordinates: [
+                    [17.4042, 78.4633], [17.4010, 78.4660], [17.3975, 78.4685], [17.3940, 78.4705], [17.3921, 78.4716]
+                ]
+            },
+            {
+                id: "khairatabad--necklace_south", from: "khairatabad", to: "necklace_south",
+                name: "IMAX Lake Link Road", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4116, 78.4611], [17.4132, 78.4622], [17.4148, 78.4636], [17.4157, 78.4660]
+                ]
+            },
+            {
+                id: "khairatabad--secretariat", from: "khairatabad", to: "secretariat",
+                name: "NTR Marg (Lakeside Boulevard)", roadType: "normal", speedKmh: 50,
+                coordinates: [
+                    [17.4116, 78.4611], [17.4112, 78.4645], [17.4100, 78.4690], [17.4095, 78.4725], [17.4089, 78.4755]
+                ]
+            },
+            {
+                id: "khairatabad--raj_bhavan", from: "khairatabad", to: "raj_bhavan",
+                name: "Raj Bhavan Road South", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4116, 78.4611], [17.4135, 78.4601], [17.4160, 78.4592], [17.4190, 78.4585]
+                ]
+            },
+            {
+                id: "raj_bhavan--somajiguda", from: "raj_bhavan", to: "somajiguda",
+                name: "Raj Bhavan Road North", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4190, 78.4585], [17.4215, 78.4578], [17.4238, 78.4568], [17.4257, 78.4530]
+                ]
+            },
+            {
+                id: "somajiguda--punjagutta", from: "somajiguda", to: "punjagutta",
+                name: "Punjagutta Main Road", roadType: "normal", speedKmh: 40,
+                coordinates: [
+                    [17.4257, 78.4530], [17.4264, 78.4526], [17.4270, 78.4523]
+                ]
+            },
+            {
+                id: "punjagutta--ameerpet", from: "punjagutta", to: "ameerpet",
+                name: "Ameerpet Metro Corridor", roadType: "normal", speedKmh: 40,
+                coordinates: [
+                    [17.4270, 78.4523], [17.4301, 78.4481], [17.4315, 78.4500], [17.4349, 78.4504], [17.4360, 78.4554]
+                ]
+            },
+            {
+                id: "somajiguda--begumpet", from: "somajiguda", to: "begumpet",
+                name: "Begumpet Main Road", roadType: "normal", speedKmh: 50,
+                coordinates: [
+                    [17.4257, 78.4530], [17.4305, 78.4580], [17.4356, 78.4557], [17.4385, 78.4565], [17.4420, 78.4580]
+                ]
+            },
+            {
+                id: "necklace_south--necklace_mid", from: "necklace_south", to: "necklace_mid",
+                name: "PVNR Marg (Lakefront South)", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4157, 78.4660], [17.4180, 78.4630], [17.4220, 78.4625], [17.4264, 78.4623]
+                ]
+            },
+            {
+                id: "necklace_mid--jalavihar", from: "necklace_mid", to: "jalavihar",
+                name: "PVNR Marg (Mid Lake Arc)", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4264, 78.4623], [17.4285, 78.4625], [17.4305, 78.4629]
+                ]
+            },
+            {
+                id: "jalavihar--sanjeevaiah", from: "jalavihar", to: "sanjeevaiah",
+                name: "PVNR Marg (North Lakefront)", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4305, 78.4629], [17.4335, 78.4650], [17.4360, 78.4675], [17.4374, 78.4691]
+                ]
+            },
+            {
+                id: "sanjeevaiah--minister_road", from: "sanjeevaiah", to: "minister_road",
+                name: "Minister Road Link", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4374, 78.4691], [17.4390, 78.4745], [17.4411, 78.4789]
+                ]
+            },
+            {
+                id: "sanjeevaiah--ranigunj", from: "sanjeevaiah", to: "ranigunj",
+                name: "Sanjeevaiah to Ranigunj Connector", roadType: "normal", speedKmh: 40,
+                coordinates: [
+                    [17.4374, 78.4691], [17.4375, 78.4760], [17.4375, 78.4800], [17.4365, 78.4842]
+                ]
+            },
+            {
+                id: "secretariat--tankbund_south", from: "secretariat", to: "tankbund_south",
+                name: "Lumbini Access Road", roadType: "normal", speedKmh: 40,
+                coordinates: [
+                    [17.4089, 78.4755], [17.4110, 78.4770], [17.4128, 78.4785], [17.4145, 78.4795]
+                ]
+            },
+            {
+                id: "tankbund_south--tankbund_mid", from: "tankbund_south", to: "tankbund_mid",
+                name: "Tank Bund Road South", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4145, 78.4795], [17.4180, 78.4820], [17.4200, 78.4835], [17.4215, 78.4845]
+                ]
+            },
+            {
+                id: "tankbund_mid--ranigunj", from: "tankbund_mid", to: "ranigunj",
+                name: "Tank Bund Road North", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4215, 78.4845], [17.4257, 78.4864], [17.4305, 78.4868], [17.4343, 78.4868], [17.4365, 78.4842]
+                ]
+            },
+            {
+                id: "secretariat--lower_tankbund", from: "secretariat", to: "lower_tankbund",
+                name: "Telugu Thalli Flyover Entry", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4089, 78.4755], [17.4105, 78.4770], [17.4128, 78.4784]
+                ]
+            },
+            {
+                id: "lower_tankbund--kavadiguda", from: "lower_tankbund", to: "kavadiguda",
+                name: "Lower Tank Bund Express Bypass", roadType: "shortcut", speedKmh: 65,
+                coordinates: [
+                    [17.4128, 78.4784], [17.4153, 78.4800], [17.4194, 78.4834], [17.4211, 78.4850], [17.4225, 78.4866]
+                ]
+            },
+            {
+                id: "kavadiguda--ranigunj", from: "kavadiguda", to: "ranigunj",
+                name: "Kavadiguda Arterial", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4225, 78.4866], [17.4265, 78.4865], [17.4310, 78.4855], [17.4365, 78.4842]
+                ]
+            },
+            {
+                id: "begumpet--minister_road", from: "begumpet", to: "minister_road",
+                name: "Begumpet Airport Road", roadType: "normal", speedKmh: 50,
+                coordinates: [
+                    [17.4420, 78.4580], [17.4428, 78.4665], [17.4420, 78.4715], [17.4411, 78.4789]
+                ]
+            },
+            {
+                id: "minister_road--paradise", from: "minister_road", to: "paradise",
+                name: "MG Road / Paradise Corridor", roadType: "normal", speedKmh: 50,
+                coordinates: [
+                    [17.4411, 78.4789], [17.4415, 78.4820], [17.4418, 78.4850], [17.4422, 78.4878]
+                ]
+            },
+            {
+                id: "ranigunj--paradise", from: "ranigunj", to: "paradise",
+                name: "Bible House / RP Road", roadType: "normal", speedKmh: 45,
+                coordinates: [
+                    [17.4365, 78.4842], [17.4385, 78.4860], [17.4405, 78.4870], [17.4422, 78.4878]
+                ]
+            }
+        ];
 
-        const edgeId = options.id || `${from}--${to}`;
-        const reverseEdgeId = `${to}--${from}`;
-        const roadType = options.roadType || 'normal'; // 'normal', 'shortcut', 'blocked'
-        const isBlocked = options.blocked || roadType === 'blocked' || false;
-        
-        // Speed in km/h based on road category
-        const speedKmH = options.speedKmH || (roadType === 'shortcut' ? 65 : 45);
+        edgesData.forEach(e => {
+            const distMeters = Math.round(GeoUtils.polylineDistanceMeters(e.coordinates));
+            const edgeObj = {
+                id: e.id,
+                from: e.from,
+                to: e.to,
+                name: e.name,
+                coordinates: e.coordinates,
+                distanceMeters: distMeters,
+                distanceKm: Number((distMeters / 1000).toFixed(3)),
+                roadType: e.roadType || "normal",
+                speedKmh: e.speedKmh || (e.roadType === "shortcut" ? 65 : 45),
+                blocked: false,
+                shortcut: e.roadType === "shortcut",
+                trafficSignalId: this.roadNetwork.nodes[e.to]?.trafficSignalId || null
+            };
 
-        const forwardEdge = {
-            id: edgeId,
-            from,
-            to,
-            name: options.name || `${fromNode.name} ↔ ${toNode.name}`,
-            distance: Number(distance.toFixed(3)),
-            speedKmH,
-            baseCost: roadType === 'shortcut' ? 0.5 : 1.0,
-            roadType,
-            blocked: isBlocked,
-            coordinates: coords
+            this.roadNetwork.edges[e.id] = edgeObj;
+
+            // Connect to nodes
+            this.roadNetwork.nodes[e.from].connectedEdges.push(e.id);
+            this.roadNetwork.nodes[e.to].connectedEdges.push(e.id);
+
+            // Register directed traversals in adjacency map
+            // Forward traversal: from -> to
+            this.adjacencyMap.get(e.from).push({
+                edgeId: e.id,
+                from: e.from,
+                to: e.to,
+                isReverse: false
+            });
+
+            // Reverse traversal: to -> from (Bidirectional road)
+            this.adjacencyMap.get(e.to).push({
+                edgeId: e.id,
+                from: e.to,
+                to: e.from,
+                isReverse: true
+            });
+        });
+
+        // 3. Authoritative Traffic Signals (Section 13, 14, 17)
+        // Delays: green = 0s, yellow = 10s, red = 30s
+        this.roadNetwork.signals = {
+            "sig_secretariat": {
+                id: "sig_secretariat",
+                nodeId: "secretariat",
+                state: "GREEN",
+                delays: { green: 0, yellow: 10, red: 30 }
+            },
+            "sig_tankbund_south": {
+                id: "sig_tankbund_south",
+                nodeId: "tankbund_south",
+                state: "RED",
+                delays: { green: 0, yellow: 10, red: 30 }
+            },
+            "sig_punjagutta": {
+                id: "sig_punjagutta",
+                nodeId: "punjagutta",
+                state: "YELLOW",
+                delays: { green: 0, yellow: 10, red: 30 }
+            },
+            "sig_begumpet": {
+                id: "sig_begumpet",
+                nodeId: "begumpet",
+                state: "GREEN",
+                delays: { green: 0, yellow: 10, red: 30 }
+            }
         };
 
-        const reverseCoords = [...coords].reverse();
-        const reverseEdge = {
-            id: reverseEdgeId,
-            from: to,
-            to: from,
-            name: forwardEdge.name,
-            distance: forwardEdge.distance,
-            speedKmH,
-            baseCost: forwardEdge.baseCost,
-            roadType,
-            blocked: isBlocked,
-            coordinates: reverseCoords
-        };
-
-        this.edges.set(edgeId, forwardEdge);
-        this.edges.set(reverseEdgeId, reverseEdge);
-
-        this.adjacencyList.get(from).push(forwardEdge);
-        this.adjacencyList.get(to).push(reverseEdge);
-
-        return forwardEdge;
+        // Run validation immediately to ensure 100% integrity
+        this.validateTrafficSignals();
     }
 
     /**
-     * Travel-time cost model for DIJKSTRA FASTEST ROUTE
-     * 
-     * Formula:
-     *   travelTimeMinutes = (distanceKm / speedKmH) * 60 * speedMultiplier + trafficSignalDelayMinutes
-     *
-     * Modifiers:
-     *   - Normal Road: Multiplier = 1.0 (speed: 45 km/h)
-     *   - Shortcut: Multiplier = 0.8 (express speed: 65 km/h)
-     *   - Green Light: +0 delay
-     *   - Yellow Light: +0.33 min (+20 sec delay)
-     *   - Red Light: +1.25 min (+75 sec delay)
-     *   - Blocked: Infinity
+     * Section 15: Signal Validation
+     * Confirms node exists, is intersection, has >= 2 connected edges, and valid coordinates.
      */
-    getTravelTimeCost(edge) {
-        const toNode = this.nodes.get(edge.to);
+    validateTrafficSignals() {
+        const invalidSignalIds = [];
 
-        if (edge.blocked || (toNode && toNode.blocked)) {
-            return Infinity;
+        for (const [sigId, signal] of Object.entries(this.roadNetwork.signals)) {
+            const node = this.roadNetwork.nodes[signal.nodeId];
+            if (!node) {
+                console.warn(`[TRAFFIC] Invalid traffic signal removed (node '${signal.nodeId}' does not exist):`, sigId);
+                invalidSignalIds.push(sigId);
+                continue;
+            }
+
+            if (node.type !== "intersection") {
+                console.warn(`[TRAFFIC] Invalid traffic signal removed (node '${node.id}' is not an intersection):`, sigId);
+                invalidSignalIds.push(sigId);
+                continue;
+            }
+
+            if (!node.connectedEdges || node.connectedEdges.length < 2) {
+                console.warn(`[TRAFFIC] Invalid traffic signal removed (node '${node.id}' has < 2 connected edges):`, sigId);
+                invalidSignalIds.push(sigId);
+                continue;
+            }
+
+            if (typeof node.lat !== 'number' || typeof node.lng !== 'number') {
+                console.warn(`[TRAFFIC] Invalid traffic signal removed (invalid coordinate):`, sigId);
+                invalidSignalIds.push(sigId);
+                continue;
+            }
         }
 
-        let speed = edge.speedKmH || 45;
+        invalidSignalIds.forEach(id => {
+            const nodeId = this.roadNetwork.signals[id]?.nodeId;
+            if (nodeId && this.roadNetwork.nodes[nodeId]) {
+                this.roadNetwork.nodes[nodeId].trafficSignalId = null;
+            }
+            delete this.roadNetwork.signals[id];
+        });
+
+        return {
+            validCount: Object.keys(this.roadNetwork.signals).length,
+            removedCount: invalidSignalIds.length
+        };
+    }
+
+    /**
+     * Travel time cost model for DIJKSTRA FASTEST ROUTE (Section 17 & 22)
+     * Cost in Seconds = roadTravelTimeSeconds + signalDelaySeconds
+     * Speed multiplier applied for shortcuts (0.85).
+     */
+    getTravelTimeSeconds(edgeId, targetNodeId) {
+        const edge = this.roadNetwork.edges[edgeId];
+        if (!edge || edge.blocked) return Infinity;
+
+        const targetNode = this.roadNetwork.nodes[targetNodeId];
+        if (!targetNode || targetNode.blocked) return Infinity;
+
+        let speedKmh = edge.speedKmh || 45;
         let speedMultiplier = 1.0;
 
-        if (edge.roadType === 'shortcut') {
-            speed = Math.max(speed, 65);
-            speedMultiplier = 0.85; // Additional bypass advantage
-        } else if (edge.roadType === 'blocked') {
-            return Infinity;
+        if (edge.shortcut || edge.roadType === "shortcut") {
+            speedKmh = Math.max(speedKmh, 65);
+            speedMultiplier = 0.85; // Bypass speed advantage
         }
 
-        // Base driving time in minutes
-        let timeMinutes = (edge.distance / speed) * 60 * speedMultiplier;
+        // Base road travel time: (distance in meters / speed in m/s) * multiplier
+        const speedMps = (speedKmh * 1000) / 3600;
+        let travelTimeSec = (edge.distanceMeters / speedMps) * speedMultiplier;
 
-        // Destination node traffic light delay in minutes
-        let signalDelayMinutes = 0;
-        if (toNode && toNode.trafficLight) {
-            if (toNode.trafficState === 'red') {
-                signalDelayMinutes = 1.25; // 75 seconds red signal penalty
-            } else if (toNode.trafficState === 'yellow') {
-                signalDelayMinutes = 0.33; // 20 seconds yellow signal penalty
+        // Intersection traffic signal delay at target node
+        let signalDelaySec = 0;
+        if (targetNode.trafficSignalId && this.roadNetwork.signals[targetNode.trafficSignalId]) {
+            const signal = this.roadNetwork.signals[targetNode.trafficSignalId];
+            const state = signal.state?.toUpperCase();
+            if (state === "RED") {
+                signalDelaySec = signal.delays.red; // 30s
+            } else if (state === "YELLOW") {
+                signalDelaySec = signal.delays.yellow; // 10s
+            } else {
+                signalDelaySec = signal.delays.green; // 0s
             }
         }
 
-        return timeMinutes + signalDelayMinutes;
+        return travelTimeSec + signalDelaySec;
     }
 
     /**
-     * Distance cost model for NORMAL / CASUAL ROUTE
-     * Minimizes simple geographic distance without speed optimizations or live traffic awareness.
-     * Blocked roads are still impassable (Infinity).
+     * Distance cost model for NORMAL ROUTE (Section 22)
+     * Cost in Meters = physical road distance
      */
-    getDistanceCost(edge) {
-        const toNode = this.nodes.get(edge.to);
-        if (edge.blocked || (toNode && toNode.blocked) || edge.roadType === 'blocked') {
-            return Infinity;
-        }
-        return edge.distance;
+    getDistanceCostMeters(edgeId, targetNodeId) {
+        const edge = this.roadNetwork.edges[edgeId];
+        if (!edge || edge.blocked) return Infinity;
+
+        const targetNode = this.roadNetwork.nodes[targetNodeId];
+        if (!targetNode || targetNode.blocked) return Infinity;
+
+        return edge.distanceMeters;
     }
 
     /**
-     * General dynamic cost wrapper used by algorithm routers
+     * Section 26 & 27: Get Directed Edge Coordinates
+     * Traverses in forward direction if from === edge.from;
+     * Returns reversed copy if traversing from edge.to to edge.from.
+     * NEVER mutates the underlying edge.coordinates array.
      */
-    getDynamicCost(edge, mode = 'fastest') {
-        if (mode === 'normal') {
-            return this.getDistanceCost(edge);
+    getDirectedCoordinates(edgeId, traversalFromNodeId) {
+        const edge = this.roadNetwork.edges[edgeId];
+        if (!edge) return [];
+
+        if (traversalFromNodeId === edge.from) {
+            // Forward direction
+            return [...edge.coordinates];
+        } else if (traversalFromNodeId === edge.to) {
+            // Reverse direction: reverse coordinates without mutating original
+            return [...edge.coordinates].reverse();
         }
-        return this.getTravelTimeCost(edge);
+
+        console.error(`[ROUTING] Traversal node ${traversalFromNodeId} does not match edge ${edgeId} endpoints`);
+        return [...edge.coordinates];
     }
 
     /**
-     * Intelligent Snap-to-Road System:
-     * Finds the nearest road segment or intersection to the clicked latitude/longitude.
-     * Projects perpendicular point onto road line segments for pinpoint accuracy.
+     * Section 3 & 43: Intelligent Snap-To-Road System
+     * 1. Takes clicked lat/lng.
+     * 2. Finds nearest road segment across all edge polylines.
+     * 3. Orthogonally projects point onto road segment.
+     * 4. Snaps to road and identifies corresponding nearest graph node.
      */
-    findNearestRoadAndNode(lat, lng, maxDistanceKm = 2.0) {
-        let bestCandidate = null;
-        let minDistanceKm = Infinity;
+    snapPointToRoad(lat, lng, maxSearchMeters = 2000) {
+        const clickCoord = [lat, lng];
+        let bestEdge = null;
+        let bestProjPoint = null;
+        let minDistanceMeters = Infinity;
+        let bestNode = null;
 
-        // 1. Check all graph nodes
-        for (const [, node] of this.nodes) {
-            const dist = CityRoadGraph.calculateHaversine(lat, lng, node.lat, node.lng);
-            if (dist < minDistanceKm) {
-                minDistanceKm = dist;
-                bestCandidate = {
-                    type: 'node',
-                    node: node,
-                    snappedLat: node.lat,
-                    snappedLng: node.lng,
-                    distanceKm: dist
-                };
-            }
-        }
-
-        // 2. Check all road geometry segments for even tighter projection
-        for (const [, edge] of this.edges) {
+        for (const [edgeId, edge] of Object.entries(this.roadNetwork.edges)) {
             const coords = edge.coordinates;
             for (let i = 0; i < coords.length - 1; i++) {
-                const p1 = coords[i];
-                const p2 = coords[i + 1];
+                const proj = GeoUtils.projectPointOnSegment(clickCoord, coords[i], coords[i + 1]);
+                const dist = GeoUtils.distanceMeters(clickCoord, proj.point);
 
-                const projected = this.projectPointOnSegment(lat, lng, p1[0], p1[1], p2[0], p2[1]);
-                const dist = CityRoadGraph.calculateHaversine(lat, lng, projected.lat, projected.lng);
+                if (dist < minDistanceMeters) {
+                    minDistanceMeters = dist;
+                    bestProjPoint = proj.point;
+                    bestEdge = edge;
 
-                if (dist < minDistanceKm) {
-                    minDistanceKm = dist;
-                    const dFrom = CityRoadGraph.calculateHaversine(projected.lat, projected.lng, coords[0][0], coords[0][1]);
-                    const dTo = CityRoadGraph.calculateHaversine(projected.lat, projected.lng, coords[coords.length - 1][0], coords[coords.length - 1][1]);
-                    const closestNodeId = dFrom <= dTo ? edge.from : edge.to;
-
-                    bestCandidate = {
-                        type: 'road',
-                        edge: edge,
-                        node: this.nodes.get(closestNodeId),
-                        snappedLat: projected.lat,
-                        snappedLng: projected.lng,
-                        distanceKm: dist
-                    };
+                    // Choose closest node of this edge to the projected point
+                    const dFrom = GeoUtils.distanceMeters(proj.point, [this.roadNetwork.nodes[edge.from].lat, this.roadNetwork.nodes[edge.from].lng]);
+                    const dTo = GeoUtils.distanceMeters(proj.point, [this.roadNetwork.nodes[edge.to].lat, this.roadNetwork.nodes[edge.to].lng]);
+                    const chosenNodeId = dFrom <= dTo ? edge.from : edge.to;
+                    bestNode = this.roadNetwork.nodes[chosenNodeId];
                 }
             }
         }
 
-        if (minDistanceKm <= maxDistanceKm && bestCandidate) {
-            return bestCandidate;
+        if (bestEdge && bestNode && minDistanceMeters <= maxSearchMeters) {
+            return {
+                success: true,
+                snappedLat: bestProjPoint[0],
+                snappedLng: bestProjPoint[1],
+                distanceMeters: minDistanceMeters,
+                edge: bestEdge,
+                node: bestNode
+            };
         }
 
-        // Fallback: return closest node
-        let absoluteClosest = null;
-        let absMin = Infinity;
-        for (const [, node] of this.nodes) {
-            const d = CityRoadGraph.calculateHaversine(lat, lng, node.lat, node.lng);
-            if (d < absMin) {
-                absMin = d;
-                absoluteClosest = {
-                    type: 'node',
-                    node,
-                    snappedLat: node.lat,
-                    snappedLng: node.lng,
-                    distanceKm: d
-                };
+        // Fallback to closest node if within range
+        let closestNode = null;
+        let minNodeDist = Infinity;
+        for (const [, node] of Object.entries(this.roadNetwork.nodes)) {
+            const d = GeoUtils.distanceMeters(clickCoord, [node.lat, node.lng]);
+            if (d < minNodeDist) {
+                minNodeDist = d;
+                closestNode = node;
             }
         }
-        return absoluteClosest;
-    }
 
-    /**
-     * Orthogonal projection of point P onto segment AB
-     */
-    projectPointOnSegment(pLat, pLng, aLat, aLng, bLat, bLng) {
-        const dx = bLng - aLng;
-        const dy = bLat - aLat;
-        const lengthSq = dx * dx + dy * dy;
-
-        if (lengthSq === 0) {
-            return { lat: aLat, lng: aLng };
+        if (closestNode && minNodeDist <= maxSearchMeters) {
+            return {
+                success: true,
+                snappedLat: closestNode.lat,
+                snappedLng: closestNode.lng,
+                distanceMeters: minNodeDist,
+                edge: null,
+                node: closestNode
+            };
         }
 
-        const t = Math.max(0, Math.min(1, ((pLng - aLng) * dx + (pLat - aLat) * dy) / lengthSq));
-
-        return {
-            lat: aLat + t * dy,
-            lng: aLng + t * dx
-        };
+        return { success: false, distanceMeters: minDistanceMeters };
     }
 
     /**
-     * Reset all dynamic states on the graph to defaults
+     * Reset dynamic obstacles, shortcuts, and custom changes
      */
     resetState() {
-        this.initializeDefaultNetwork();
+        this.loadDefaultNetwork();
     }
+}
 
-    /**
-     * Load Central Hyderabad Road Network with realistic multi-point curves
-     */
-    initializeDefaultNetwork() {
-        this.nodes.clear();
-        this.edges.clear();
-        this.adjacencyList.clear();
-
-        // 1. Intersections & Landmarks
-        const nodesData = [
-            { id: 'lakdikapul', name: 'Lakdikapul Junction', lat: 17.4042, lng: 78.4633, trafficLight: false },
-            { id: 'nampally', name: 'Nampally Station', lat: 17.3921, lng: 78.4716, trafficLight: false },
-            { id: 'khairatabad', name: 'Khairatabad Junction', lat: 17.4116, lng: 78.4611, trafficLight: false },
-            { id: 'necklace_south', name: 'Necklace Road (South / IMAX)', lat: 17.4150, lng: 78.4635, trafficLight: false },
-            { id: 'secretariat', name: 'Telangana Secretariat Circle', lat: 17.4128, lng: 78.4715, trafficLight: true, trafficState: 'green' },
-            { id: 'tankbund_south', name: 'Tank Bund South (Lumbini Park)', lat: 17.4140, lng: 78.4740, trafficLight: true, trafficState: 'red' },
-            { id: 'lower_tankbund', name: 'Lower Tank Bund Entry', lat: 17.4150, lng: 78.4760, trafficLight: false },
-            { id: 'raj_bhavan', name: 'Raj Bhavan Road', lat: 17.4190, lng: 78.4585, trafficLight: false },
-            { id: 'somajiguda', name: 'Somajiguda Circle', lat: 17.4255, lng: 78.4560, trafficLight: false },
-            { id: 'punjagutta', name: 'Punjagutta Central Circle', lat: 17.4284, lng: 78.4526, trafficLight: true, trafficState: 'yellow' },
-            { id: 'ameerpet', name: 'Ameerpet Crossroads', lat: 17.4375, lng: 78.4483, trafficLight: false },
-            { id: 'necklace_mid', name: 'PVNR Marg (People\'s Plaza)', lat: 17.4265, lng: 78.4645, trafficLight: false },
-            { id: 'jalavihar', name: 'Jalavihar Water Park', lat: 17.4320, lng: 78.4675, trafficLight: false },
-            { id: 'sanjeevaiah', name: 'Sanjeevaiah Park Station', lat: 17.4350, lng: 78.4720, trafficLight: false },
-            { id: 'tankbund_mid', name: 'Tank Bund Promenade (Buddha View)', lat: 17.4230, lng: 78.4782, trafficLight: false },
-            { id: 'ranigunj', name: 'Ranigunj / Tank Bund North', lat: 17.4350, lng: 78.4830, trafficLight: false },
-            { id: 'kavadiguda', name: 'Kavadiguda Crossroads', lat: 17.4220, lng: 78.4830, trafficLight: false },
-            { id: 'begumpet', name: 'Begumpet Flyover Junction', lat: 17.4415, lng: 78.4660, trafficLight: true, trafficState: 'green' },
-            { id: 'minister_road', name: 'Minister Road Junction', lat: 17.4410, lng: 78.4770, trafficLight: false },
-            { id: 'paradise', name: 'Paradise Circle', lat: 17.4418, lng: 78.4872, trafficLight: false }
-        ];
-
-        nodesData.forEach(n => {
-            this.addNode(n.id, n.name, n.lat, n.lng, {
-                trafficLight: n.trafficLight || false,
-                trafficState: n.trafficState || 'green'
-            });
-        });
-
-        // 2. Realistic multi-coordinate road segments tracing true street paths
-        const roadsData = [
-            {
-                from: 'lakdikapul',
-                to: 'khairatabad',
-                name: 'Khairatabad Road',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4042, 78.4633],
-                    [17.4080, 78.4622],
-                    [17.4116, 78.4611]
-                ]
-            },
-            {
-                from: 'lakdikapul',
-                to: 'nampally',
-                name: 'Nampally Station Road',
-                roadType: 'normal',
-                speedKmH: 40,
-                coordinates: [
-                    [17.4042, 78.4633],
-                    [17.3980, 78.4670],
-                    [17.3921, 78.4716]
-                ]
-            },
-            {
-                from: 'khairatabad',
-                to: 'necklace_south',
-                name: 'IMAX Lake Link Road',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4116, 78.4611],
-                    [17.4135, 78.4622],
-                    [17.4150, 78.4635]
-                ]
-            },
-            {
-                from: 'khairatabad',
-                to: 'secretariat',
-                name: 'NTR Marg (Lakeside Boulevard)',
-                roadType: 'normal',
-                speedKmH: 50,
-                coordinates: [
-                    [17.4116, 78.4611],
-                    [17.4122, 78.4650],
-                    [17.4125, 78.4685],
-                    [17.4128, 78.4715]
-                ]
-            },
-            {
-                from: 'khairatabad',
-                to: 'raj_bhavan',
-                name: 'Raj Bhavan Road South',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4116, 78.4611],
-                    [17.4150, 78.4600],
-                    [17.4190, 78.4585]
-                ]
-            },
-            {
-                from: 'raj_bhavan',
-                to: 'somajiguda',
-                name: 'Raj Bhavan Road North',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4190, 78.4585],
-                    [17.4220, 78.4572],
-                    [17.4255, 78.4560]
-                ]
-            },
-            {
-                from: 'somajiguda',
-                to: 'punjagutta',
-                name: 'Punjagutta Main Road',
-                roadType: 'normal',
-                speedKmH: 40,
-                coordinates: [
-                    [17.4255, 78.4560],
-                    [17.4270, 78.4542],
-                    [17.4284, 78.4526]
-                ]
-            },
-            {
-                from: 'punjagutta',
-                to: 'ameerpet',
-                name: 'Ameerpet Metro Corridor',
-                roadType: 'normal',
-                speedKmH: 40,
-                coordinates: [
-                    [17.4284, 78.4526],
-                    [17.4330, 78.4505],
-                    [17.4375, 78.4483]
-                ]
-            },
-            {
-                from: 'somajiguda',
-                to: 'begumpet',
-                name: 'Begumpet Main Road',
-                roadType: 'normal',
-                speedKmH: 50,
-                coordinates: [
-                    [17.4255, 78.4560],
-                    [17.4320, 78.4600],
-                    [17.4375, 78.4635],
-                    [17.4415, 78.4660]
-                ]
-            },
-            {
-                from: 'necklace_south',
-                to: 'necklace_mid',
-                name: 'PVNR Marg (Lakefront South)',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4150, 78.4635],
-                    [17.4190, 78.4638],
-                    [17.4230, 78.4642],
-                    [17.4265, 78.4645]
-                ]
-            },
-            {
-                from: 'necklace_mid',
-                to: 'jalavihar',
-                name: 'PVNR Marg (Mid Lake Arc)',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4265, 78.4645],
-                    [17.4290, 78.4655],
-                    [17.4320, 78.4675]
-                ]
-            },
-            {
-                from: 'jalavihar',
-                to: 'sanjeevaiah',
-                name: 'PVNR Marg (North Lakefront)',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4320, 78.4675],
-                    [17.4338, 78.4695],
-                    [17.4350, 78.4720]
-                ]
-            },
-            {
-                from: 'sanjeevaiah',
-                to: 'minister_road',
-                name: 'Minister Road Link',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4350, 78.4720],
-                    [17.4380, 78.4745],
-                    [17.4410, 78.4770]
-                ]
-            },
-            {
-                from: 'sanjeevaiah',
-                to: 'ranigunj',
-                name: 'Sanjeevaiah to Ranigunj Connector',
-                roadType: 'normal',
-                speedKmH: 40,
-                coordinates: [
-                    [17.4350, 78.4720],
-                    [17.4348, 78.4760],
-                    [17.4350, 78.4800],
-                    [17.4350, 78.4830]
-                ]
-            },
-            {
-                from: 'secretariat',
-                to: 'tankbund_south',
-                name: 'Lumbini Access Road',
-                roadType: 'normal',
-                speedKmH: 40,
-                coordinates: [
-                    [17.4128, 78.4715],
-                    [17.4135, 78.4728],
-                    [17.4140, 78.4740]
-                ]
-            },
-            {
-                from: 'tankbund_south',
-                to: 'tankbund_mid',
-                name: 'Tank Bund Road South',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4140, 78.4740],
-                    [17.4180, 78.4760],
-                    [17.4230, 78.4782]
-                ]
-            },
-            {
-                from: 'tankbund_mid',
-                to: 'ranigunj',
-                name: 'Tank Bund Road North',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4230, 78.4782],
-                    [17.4290, 78.4805],
-                    [17.4350, 78.4830]
-                ]
-            },
-            {
-                from: 'secretariat',
-                to: 'lower_tankbund',
-                name: 'Telugu Thalli Flyover Entry',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4128, 78.4715],
-                    [17.4135, 78.4740],
-                    [17.4150, 78.4760]
-                ]
-            },
-            {
-                from: 'lower_tankbund',
-                to: 'kavadiguda',
-                name: 'Lower Tank Bund Express Bypass',
-                roadType: 'shortcut', // Default high-speed bypass
-                speedKmH: 65,
-                coordinates: [
-                    [17.4150, 78.4760],
-                    [17.4185, 78.4795],
-                    [17.4220, 78.4830]
-                ]
-            },
-            {
-                from: 'kavadiguda',
-                to: 'ranigunj',
-                name: 'Kavadiguda Arterial',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4220, 78.4830],
-                    [17.4285, 78.4830],
-                    [17.4350, 78.4830]
-                ]
-            },
-            {
-                from: 'begumpet',
-                to: 'minister_road',
-                name: 'Begumpet Airport Road',
-                roadType: 'normal',
-                speedKmH: 50,
-                coordinates: [
-                    [17.4415, 78.4660],
-                    [17.4412, 78.4715],
-                    [17.4410, 78.4770]
-                ]
-            },
-            {
-                from: 'minister_road',
-                to: 'paradise',
-                name: 'MG Road / Paradise Corridor',
-                roadType: 'normal',
-                speedKmH: 50,
-                coordinates: [
-                    [17.4410, 78.4770],
-                    [17.4414, 78.4820],
-                    [17.4418, 78.4872]
-                ]
-            },
-            {
-                from: 'ranigunj',
-                to: 'paradise',
-                name: 'Bible House / RP Road',
-                roadType: 'normal',
-                speedKmH: 45,
-                coordinates: [
-                    [17.4350, 78.4830],
-                    [17.4385, 78.4851],
-                    [17.4418, 78.4872]
-                ]
-            }
-        ];
-
-        roadsData.forEach(r => {
-            this.addEdge(r.from, r.to, r.coordinates, {
-                name: r.name,
-                roadType: r.roadType,
-                speedKmH: r.speedKmH
-            });
-        });
-    }
+// Attach to window for standard browser script execution
+if (typeof window !== 'undefined') {
+    window.CityRoadGraph = CityRoadGraph;
+}
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = CityRoadGraph;
 }

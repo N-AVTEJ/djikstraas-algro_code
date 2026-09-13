@@ -219,6 +219,90 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Section 21: Normal Route Flow (Casual / Standard Road baseline)
+    function handleCalculateNormalRoute() {
+        const startNodeId = navigationState.state.start.nodeId;
+        const targetNodeId = navigationState.state.destination.nodeId;
+
+        if (!startNodeId || !targetNodeId) {
+            ui.showBanner('⚠️ Please select both a Start and Destination point.', 'warning');
+            return null;
+        }
+
+        vehicle.stop();
+        ui.setActiveMode('normal');
+        ui.setStatusBadge('CALCULATING', 'badge-calculating');
+
+        const routes = routingManager.computeRoutes(startNodeId, targetNodeId);
+        mapManager.clearRoutes();
+
+        const normalRes = routes.normal;
+        if (normalRes && normalRes.success) {
+            navigationState.setRoutes(normalRes, routes.dijkstra, 'normal');
+            mapManager.renderNormalRoute(normalRes);
+            ui.setStatusBadge('NORMAL ROUTE', 'badge-ready');
+            ui.showBanner(`🔵 Normal Route loaded: <b>${normalRes.distanceKm} km, ~${normalRes.estimatedTimeMin} min</b>. Click <b>▶️ Start Drive</b> or <b>⚡ Apply Dijkstra</b>!`, 'info');
+            ui.updateComparisonAndExplainability(routes.comparison);
+            ui.updateTelemetry(normalRes);
+            ui.updateDebugHud(graph, normalRes, vehicle);
+            mapManager.fitRoute(normalRes.coordinates);
+        } else {
+            ui.setStatusBadge('NO ROUTE', 'badge-error');
+            ui.showBanner(`⚠️ ${normalRes?.error || 'No route found.'}`, 'error');
+            ui.updateComparisonAndExplainability(null);
+            vehicle.reset();
+            ui.updateDebugHud(graph, null, vehicle);
+        }
+        return routes;
+    }
+
+    // Section 22: Apply Dijkstra Flow (Travel-time and traffic dynamic optimization)
+    function handleApplyDijkstra(recordSteps = false) {
+        const startNodeId = navigationState.state.start.nodeId;
+        const targetNodeId = navigationState.state.destination.nodeId;
+
+        if (!startNodeId || !targetNodeId) {
+            ui.showBanner('⚠️ Please select both a Start and Destination point.', 'warning');
+            return null;
+        }
+
+        const wasArrived = vehicle.isArrived;
+        vehicle.stop();
+
+        // Section 23: Destination remains strictly unchanged
+        ui.setActiveMode('dijkstra');
+        ui.setStatusBadge('CALCULATING', 'badge-calculating');
+
+        const routes = routingManager.computeRoutes(startNodeId, targetNodeId, recordSteps);
+        mapManager.clearRoutes();
+
+        const dijkstraRes = routes.dijkstra;
+        if (dijkstraRes && dijkstraRes.success) {
+            vehicle.validateRoute(dijkstraRes);
+            navigationState.setRoutes(routes.normal, dijkstraRes, 'dijkstra');
+            mapManager.renderDijkstraRoute(dijkstraRes);
+
+            ui.setStatusBadge('OPTIMAL ROUTE', 'badge-ready');
+            ui.showBanner(`🟢 Dijkstra Fastest Route applied! Distance: <b>${dijkstraRes.distanceKm} km</b> | ETA: <b>${dijkstraRes.estimatedTimeMin} min</b>.`, 'success');
+            ui.addTimelineEvent(`Applied Dijkstra: optimal path found (${dijkstraRes.estimatedTimeMin} min)`);
+            ui.updateComparisonAndExplainability(routes.comparison);
+            ui.updateTelemetry(dijkstraRes);
+            ui.updateDebugHud(graph, dijkstraRes, vehicle);
+            mapManager.fitRoute(dijkstraRes.coordinates);
+
+            if (wasArrived) {
+                ui.showBanner(`🏁 Dijkstra route calculated. Ready to drive! Click <b>▶️ Start Drive</b> or <b>🔄 Replay</b>.`, 'success');
+            }
+        } else {
+            ui.setStatusBadge('NO ROUTE', 'badge-error');
+            ui.showBanner(`⚠️ ${dijkstraRes?.error || 'No route found.'}`, 'error');
+            ui.updateComparisonAndExplainability(null);
+            vehicle.reset();
+            ui.updateDebugHud(graph, null, vehicle);
+        }
+        return routes;
+    }
+
     // 6. Dual Route Calculation & Rendering (Sections 4, 21, 22, 48)
     function calculateAndRenderRoutes(recordSteps = false) {
         const startNodeId = navigationState.state.start.nodeId;
@@ -229,41 +313,29 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
 
-        ui.setStatusBadge('CALCULATING', 'badge-calculating');
+        if (ui.currentMode === 'normal') {
+            return handleCalculateNormalRoute();
+        } else if (ui.currentMode === 'dijkstra') {
+            return handleApplyDijkstra(recordSteps);
+        }
 
+        ui.setStatusBadge('CALCULATING', 'badge-calculating');
         const routes = routingManager.computeRoutes(startNodeId, targetNodeId, recordSteps);
         mapManager.clearRoutes();
 
-        const mode = ui.currentMode; // 'normal' | 'dijkstra' | 'compare'
         const dijkstraRes = routes.dijkstra;
         const normalRes = routes.normal;
 
         if (routes.success && dijkstraRes && dijkstraRes.success) {
-            // Section 48: Mode Display Rule
-            if (mode === 'normal') {
-                if (normalRes && normalRes.success) {
-                    mapManager.renderNormalRoute(normalRes);
-                    ui.setStatusBadge('NORMAL ROUTE', 'badge-ready');
-                    ui.showBanner(`🔵 Displaying Normal Route (${normalRes.distanceKm} km, ~${normalRes.estimatedTimeMin} min).`, 'info');
-                }
-            } else if (mode === 'dijkstra') {
-                mapManager.renderDijkstraRoute(dijkstraRes);
-                ui.setStatusBadge('OPTIMAL ROUTE', 'badge-ready');
-                ui.showBanner(`🟢 Dijkstra Fastest Route found! Est. Time: <b>${dijkstraRes.estimatedTimeMin} min</b> | Distance: <b>${dijkstraRes.distanceKm} km</b>.`, 'success');
-            } else if (mode === 'compare') {
-                if (normalRes && normalRes.success) mapManager.renderNormalRoute(normalRes);
-                mapManager.renderDijkstraRoute(dijkstraRes);
-                ui.setStatusBadge('COMPARING', 'badge-ready');
-                ui.showBanner(`⚖️ Comparing Routes: Normal (Blue) vs Dijkstra Fastest (Green). Time Saved: <b>${routes.comparison?.timeSavedMin || 0} min</b>.`, 'success');
-            }
+            if (normalRes && normalRes.success) mapManager.renderNormalRoute(normalRes);
+            mapManager.renderDijkstraRoute(dijkstraRes);
+            ui.setStatusBadge('COMPARING', 'badge-ready');
+            ui.showBanner(`⚖️ Comparing Routes: Normal (Blue) vs Dijkstra Fastest (Green). Time Saved: <b>${routes.comparison?.timeSavedMin || 0} min</b>.`, 'success');
 
             ui.updateComparisonAndExplainability(routes.comparison);
             ui.updateTelemetry(dijkstraRes);
             ui.updateDebugHud(graph, dijkstraRes, vehicle);
-
-            // Fit map bounds to route
-            const activeCoords = mode === 'normal' ? normalRes?.coordinates : dijkstraRes?.coordinates;
-            if (activeCoords) mapManager.fitRoute(activeCoords);
+            mapManager.fitRoute(dijkstraRes.coordinates);
         } else {
             ui.setStatusBadge('NO ROUTE', 'badge-error');
             const errMsg = dijkstraRes?.error || routes.error || 'No route found.';
@@ -453,23 +525,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // 10. Routing Mode Selector
     ui.elements.btnModeNormal?.addEventListener('click', () => {
         if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
-            calculateAndRenderRoutes();
+            handleCalculateNormalRoute();
         }
     });
     ui.elements.btnModeDijkstra?.addEventListener('click', () => {
         if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
-            calculateAndRenderRoutes();
+            handleApplyDijkstra();
         }
     });
     ui.elements.btnModeCompare?.addEventListener('click', () => {
         if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
+            ui.setActiveMode('compare');
             calculateAndRenderRoutes();
         }
     });
 
     // 11. Toolbar Action Buttons
+    ui.elements.btnApplyDijkstra?.addEventListener('click', () => {
+        handleApplyDijkstra();
+    });
+
+    ui.elements.btnCalculateNormal?.addEventListener('click', () => {
+        handleCalculateNormalRoute();
+    });
+
     ui.elements.btnCalculateRoute?.addEventListener('click', () => {
-        calculateAndRenderRoutes();
+        handleApplyDijkstra();
     });
 
     ui.elements.btnSwapLocations?.addEventListener('click', () => {
@@ -604,12 +685,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (routes?.dijkstra?.success) {
                 mapManager.fitRoute(routes.dijkstra.coordinates);
-                ui.showBanner('🌟 <b>Demo Loaded:</b> Lakdikapul → Paradise Circle! Dijkstra takes the Lower Tank Bund Bypass to avoid the Red signal at Tank Bund South.', 'success');
+                ui.showBanner('🌟 <b>Demo Loaded:</b> Lakdikapul → Paradise Circle! Normal (Blue): 8.6 min. Dijkstra (Green): 8.1 min. Click <b>▶️ Start Drive</b>!', 'success');
                 ui.addTimelineEvent('Loaded Lakdikapul → Paradise presentation scenario');
-
-                setTimeout(() => {
-                    vehicle.start(routes.dijkstra, null, (p) => ui.updateProgressBar(p));
-                }, 600);
             }
         } else if (scenarioKey === 'secretariat_begumpet') {
             const start = graph.roadNetwork.nodes['secretariat'];

@@ -259,5 +259,7 @@ if (typeof window !== 'undefined') {
     window.BreadthFirstRouter = BreadthFirstRouter;
 }
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { RoutingManager, BreadthFirstRouter };
+    RoutingManager.RoutingManager = RoutingManager;
+    RoutingManager.BreadthFirstRouter = BreadthFirstRouter;
+    module.exports = RoutingManager;
 }

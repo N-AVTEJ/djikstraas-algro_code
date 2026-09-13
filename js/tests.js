@@ -8,6 +8,16 @@
  * Dijkstra path generation, traffic lights, vehicle movement, and lake boundary invariants.
  */
 
+if (typeof require !== 'undefined') {
+    if (typeof GeoUtils === 'undefined') {
+        globalThis.GeoUtils = require('./geoUtils.js');
+    }
+    if (typeof navigationState === 'undefined') {
+        const navMod = require('./navigationState.js');
+        globalThis.navigationState = navMod.navigationState;
+    }
+}
+
 class CityNavTestSuite {
     constructor(graph, routingManager, vehicle, mapManager) {
         this.graph = graph;

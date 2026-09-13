@@ -16,6 +16,12 @@
  *        Green = 0s, Yellow = 10s, Red = 30s.
  */
 
+if (typeof require !== 'undefined') {
+    if (typeof GeoUtils === 'undefined') {
+        globalThis.GeoUtils = require('./geoUtils.js');
+    }
+}
+
 class CityRoadGraph {
     constructor() {
         // Authoritative Road Network Model

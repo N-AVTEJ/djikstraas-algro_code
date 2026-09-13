@@ -10,6 +10,17 @@
  * 4. Synchronizes calculated routes with navigationState.
  */
 
+if (typeof require !== 'undefined') {
+    if (typeof DijkstraRouter === 'undefined') {
+        const dijkMod = require('./dijkstra.js');
+        globalThis.DijkstraRouter = dijkMod.DijkstraRouter;
+    }
+    if (typeof navigationState === 'undefined') {
+        const navMod = require('./navigationState.js');
+        globalThis.navigationState = navMod.navigationState;
+    }
+}
+
 class RoutingManager {
     constructor(graph) {
         this.graph = graph;

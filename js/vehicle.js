@@ -13,6 +13,16 @@
  * 7. Structured [VEHICLE] logging.
  */
 
+if (typeof require !== 'undefined') {
+    if (typeof GeoUtils === 'undefined') {
+        globalThis.GeoUtils = require('./geoUtils.js');
+    }
+    if (typeof navigationState === 'undefined') {
+        const navMod = require('./navigationState.js');
+        globalThis.navigationState = navMod.navigationState;
+    }
+}
+
 class VehicleNavigator {
     constructor(leafletMap) {
         this.map = leafletMap;
@@ -89,6 +99,12 @@ class VehicleNavigator {
      * Create or update high-visibility SVG vehicle marker with smooth rotation
      */
     _ensureMarker(lat, lng, bearing = 0) {
+        if (typeof L === 'undefined') {
+            this.currentPosition = { lat, lng };
+            this.currentBearing = bearing;
+            return;
+        }
+
         if (!this.marker) {
             const vehicleHtml = `
                 <div class="vehicle-marker-wrapper">

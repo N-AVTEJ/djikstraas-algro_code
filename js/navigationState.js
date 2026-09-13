@@ -9,6 +9,12 @@
  * animators MUST reference this state object.
  */
 
+if (typeof require !== 'undefined') {
+    if (typeof GeoUtils === 'undefined') {
+        globalThis.GeoUtils = require('./geoUtils.js');
+    }
+}
+
 class NavigationStateManager {
     constructor() {
         this.state = {

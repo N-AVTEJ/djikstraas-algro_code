@@ -14,6 +14,16 @@
  * 6. Logs structured [ROUTING] debug metrics (Section 53).
  */
 
+if (typeof require !== 'undefined') {
+    if (typeof GeoUtils === 'undefined') {
+        globalThis.GeoUtils = require('./geoUtils.js');
+    }
+    if (typeof navigationState === 'undefined') {
+        const navMod = require('./navigationState.js');
+        globalThis.navigationState = navMod.navigationState;
+    }
+}
+
 class MinHeapPriorityQueue {
     constructor() {
         this.heap = [];

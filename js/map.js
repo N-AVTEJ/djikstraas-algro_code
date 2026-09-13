@@ -83,6 +83,7 @@ class LeafletMapManager {
         this.layers.dijkstraRoute = L.layerGroup().addTo(this.map);
         this.layers.markers = L.layerGroup().addTo(this.map);
         this.layers.debugAnchors = L.layerGroup().addTo(this.map);
+        this.layers.debugRoutePoints = L.layerGroup().addTo(this.map);
         this.layers.snapIndicator = L.layerGroup().addTo(this.map);
 
         // Global Map Click Handler
@@ -361,6 +362,7 @@ class LeafletMapManager {
 
         this.layers.normalRoute.addLayer(polyline);
         this.updateDebugAnchors();
+        this.renderDebugRoutePoints(route);
         return polyline;
     }
 
@@ -401,6 +403,7 @@ class LeafletMapManager {
         this.layers.dijkstraRoute.addLayer(glow);
         this.layers.dijkstraRoute.addLayer(core);
         this.updateDebugAnchors();
+        this.renderDebugRoutePoints(route);
         return core;
     }
 
@@ -458,10 +461,34 @@ class LeafletMapManager {
         }
     }
 
+    /**
+     * Section 17: Route and Vehicle Debug Points
+     * Displays small points along route.coordinates that the vehicle will follow
+     */
+    renderDebugRoutePoints(route) {
+        this.layers.debugRoutePoints.clearLayers();
+        if (!this.showGraphOverlay || !route || !route.coordinates) return;
+
+        for (let i = 0; i < route.coordinates.length; i++) {
+            const coord = route.coordinates[i];
+            L.circleMarker(coord, {
+                radius: 3.5,
+                fillColor: '#10b981',
+                color: '#ffffff',
+                weight: 1.5,
+                opacity: 0.95,
+                fillOpacity: 0.9
+            }).bindTooltip(`● Coord ${i}: [${coord[0].toFixed(4)}, ${coord[1].toFixed(4)}]`, {
+                className: 'debug-anchor-tooltip'
+            }).addTo(this.layers.debugRoutePoints);
+        }
+    }
+
     clearRoutes() {
         this.layers.normalRoute.clearLayers();
         this.layers.dijkstraRoute.clearLayers();
         this.layers.debugAnchors.clearLayers();
+        this.layers.debugRoutePoints.clearLayers();
     }
 
     clearMarkers() {

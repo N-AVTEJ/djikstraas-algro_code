@@ -43,6 +43,8 @@ class UIManager {
             // Tools Bar
             toolBtns: document.querySelectorAll('.tool-btn'),
             btnCalculateRoute: document.getElementById('btnCalculateRoute'),
+            btnApplyDijkstra: document.getElementById('btnApplyDijkstra'),
+            btnCalculateNormal: document.getElementById('btnCalculateNormal'),
             btnFitRoute: document.getElementById('btnFitRoute'),
             btnClearRoute: document.getElementById('btnClearRoute'),
             btnResetAll: document.getElementById('btnResetAll'),

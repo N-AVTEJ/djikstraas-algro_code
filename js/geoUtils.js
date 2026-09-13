@@ -14,6 +14,13 @@
 
 class GeoUtils {
     /**
+     * Section 9: Helper to create verified Leaflet [lat, lng] points
+     */
+    static toLeafletPoint(lat, lng) {
+        return [Number(lat), Number(lng)];
+    }
+
+    /**
      * Standardize any coordinate representation to Leaflet [lat, lng] array
      */
     static toLeafletLatLng(coord) {

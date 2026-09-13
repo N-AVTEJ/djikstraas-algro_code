@@ -3,14 +3,19 @@
  * VEHICLE SIMULATOR & INTERPOLATION ENGINE (js/vehicle.js)
  * ============================================================================
  *
- * Requirements (Sections 8, 9, 10, 11, 12, 39, 40, 41):
+ * Requirements (Sections 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 37):
  * 1. Single Path: Vehicle receives route directly. vehicle.routeCoordinates = route.coordinates.
- * 2. Never cuts corners: Follows every intermediate road coordinate.
- * 3. 60fps requestAnimationFrame with precise geographic interpolation.
- * 4. Realistic heading rotation based on geodetic bearing.
- * 5. Mid-journey dynamic rerouting without teleportation or resetting.
- * 6. Geographic arrival detection (< 10 meters).
- * 7. Structured [VEHICLE] logging.
+ * 2. Cumulative Distance Array: routeProgress = [{ coordinate: [lat, lng], distanceFromStart: meters }, ...].
+ * 3. Distance-Based Movement: distanceTravelled += speedMps * deltaSeconds;
+ *    Interpolate between the two surrounding route coordinates.
+ * 4. Never cuts corners: Follows every intermediate road coordinate.
+ * 5. 60fps requestAnimationFrame with precise geographic interpolation.
+ * 6. Realistic heading rotation based on geodetic bearing.
+ * 7. Mid-journey dynamic rerouting without teleportation or resetting.
+ * 8. Geographic arrival detection (< 10 meters).
+ * 9. Route validation before animation starts.
+ * 10. Vehicle Trace Line (yellow) & Periodic Divergence Checks (<= 20m warning, > 50m critical).
+ * 11. Structured Section 37 [ROUTE] and [VEHICLE] logging.
  */
 
 if (typeof require !== 'undefined') {
@@ -29,10 +34,13 @@ class VehicleNavigator {
         this.marker = null;
         this.activeRoute = null;         // Reference to authoritative Route object
         this.routeCoordinates = [];      // [[lat, lng], ...] directly from route.coordinates
-        this.currentSegmentIndex = 0;    // Current segment index
-        this.segmentProgress = 0;        // Progress along segment [0.0, 1.0]
+        this.routeProgress = [];         // [{ coordinate: [lat, lng], distanceFromStart: meters }, ...]
+        this.totalRouteDistance = 0;     // Total route length in meters
+        this.distanceTravelled = 0;      // Distance travelled in meters along route
+        
         this.isPlaying = false;
         this.isPaused = false;
+        this.isArrived = false;
         this.speedMultiplier = 1.0;
         this.baseSpeedKmh = 45;
         this.animationFrameId = null;
@@ -41,65 +49,162 @@ class VehicleNavigator {
         this.currentPosition = null;     // { lat, lng }
         this.currentBearing = 0;
 
+        // Section 18 & 19: Debug trace & divergence monitoring
+        this.vehicleTrace = [];          // Array of [lat, lng] visited positions
+        this.tracePolyline = null;       // Yellow polyline on Leaflet map
+        this.maxDivergenceMeters = 0;
+        this.divergenceSumMeters = 0;
+        this.divergenceSamples = 0;
+        this.checkDivergenceCounter = 0;
+
         this.onProgressCallback = null;
         this.onCompleteCallback = null;
         this.onTimelineEvent = null;
     }
 
     /**
-     * Section 8: Start Animation along Route Coordinates
-     * Receives the standardized Route object
+     * Section 8: Route Pre-Animation Validation
+     */
+    validateRoute(route) {
+        if (!route) {
+            throw new Error("Vehicle route is null or undefined.");
+        }
+        if (!route.coordinates || !Array.isArray(route.coordinates) || route.coordinates.length < 2) {
+            throw new Error(`Route coordinates length must be >= 2, got ${route.coordinates?.length || 0}`);
+        }
+        if (typeof navigationState !== 'undefined') {
+            if (navigationState.state.start?.nodeId && route.startNodeId !== navigationState.state.start.nodeId) {
+                throw new Error(`Route startNodeId (${route.startNodeId}) does not match navigationState.start.nodeId (${navigationState.state.start.nodeId})`);
+            }
+            if (navigationState.state.destination?.nodeId && route.destinationNodeId !== navigationState.state.destination.nodeId) {
+                throw new Error(`Route destinationNodeId (${route.destinationNodeId}) does not match navigationState.destination.nodeId (${navigationState.state.destination.nodeId})`);
+            }
+        }
+
+        const firstPt = route.coordinates[0];
+        const lastPt = route.coordinates[route.coordinates.length - 1];
+
+        if (typeof navigationState !== 'undefined' && navigationState.state.start?.lat) {
+            const startDist = GeoUtils.distanceMeters(firstPt, [navigationState.state.start.lat, navigationState.state.start.lng]);
+            if (startDist > 30) {
+                throw new Error(`First route coordinate is ${startDist.toFixed(1)}m from start marker (limit: 30m)`);
+            }
+        }
+
+        if (typeof navigationState !== 'undefined' && navigationState.state.destination?.lat) {
+            const destDist = GeoUtils.distanceMeters(lastPt, [navigationState.state.destination.lat, navigationState.state.destination.lng]);
+            if (destDist > 30) {
+                throw new Error(`Last route coordinate is ${destDist.toFixed(1)}m from destination marker (limit: 30m)`);
+            }
+        }
+
+        for (let i = 0; i < route.coordinates.length; i++) {
+            const pt = route.coordinates[i];
+            if (!pt || pt.length < 2 || isNaN(pt[0]) || isNaN(pt[1])) {
+                throw new Error(`Invalid coordinate at index ${i}: ${JSON.stringify(pt)}`);
+            }
+            // Section 9: Check Leaflet [lat, lng] format for Hyderabad
+            if (pt[0] > 50 || pt[1] < 50) {
+                throw new Error(`Coordinate at index ${i} appears to be reversed [lng, lat]: ${JSON.stringify(pt)}. Expected [lat, lng].`);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Section 8 & 10: Start Animation along Route Coordinates
      */
     start(route, onComplete, onProgress) {
         this.reset();
         if (!route) {
             console.error('[VEHICLE] Cannot start: Route is null');
-            return;
+            return false;
         }
 
-        const coords = route.coordinates;
-        if (!coords || coords.length < 2) {
-            console.error('[VEHICLE] Cannot start: Route coordinates length < 2');
-            return;
+        try {
+            this.validateRoute(route);
+        } catch (err) {
+            console.error('[VEHICLE] Vehicle route validation failed:', err.message);
+            if (this.onTimelineEvent) {
+                this.onTimelineEvent(`Vehicle route validation failed: ${err.message}`);
+            }
+            return false;
         }
 
         this.activeRoute = route;
-        this.routeCoordinates = coords;
+        this.routeCoordinates = route.coordinates;
         this.onCompleteCallback = onComplete;
         this.onProgressCallback = onProgress;
 
-        this.currentSegmentIndex = 0;
-        this.segmentProgress = 0;
-        this.isPlaying = true;
-        this.isPaused = false;
-        this.lastTimestamp = null;
+        // Section 10: Create Cumulative Distance Array
+        this.routeProgress = [];
+        let cumDist = 0;
+        this.routeProgress.push({
+            coordinate: this.routeCoordinates[0],
+            distanceFromStart: 0
+        });
 
-        // Section 53: Log telemetry
-        console.log(`[VEHICLE] Using route: ${route.id || 'route-active'}`);
-        console.log(`[VEHICLE] Coordinate count: ${coords.length}`);
-
-        // Initialize at origin coordinate
-        const startPt = coords[0];
-        const nextPt = coords[1];
-        const initialBearing = GeoUtils.calculateBearing(startPt, nextPt);
-        this._ensureMarker(startPt[0], startPt[1], initialBearing);
-
-        if (this.onTimelineEvent) {
-            this.onTimelineEvent(`Vehicle started navigating along ${route.distanceKm} km route`);
+        for (let i = 1; i < this.routeCoordinates.length; i++) {
+            const pPrev = this.routeCoordinates[i - 1];
+            const pCurr = this.routeCoordinates[i];
+            const dist = GeoUtils.distanceMeters(pPrev, pCurr);
+            cumDist += dist;
+            this.routeProgress.push({
+                coordinate: pCurr,
+                distanceFromStart: cumDist
+            });
         }
 
-        if (this.followVehicle) {
+        this.totalRouteDistance = cumDist;
+        this.distanceTravelled = 0;
+        this.isPlaying = true;
+        this.isPaused = false;
+        this.isArrived = false;
+        this.lastTimestamp = null;
+        this.vehicleTrace = [];
+        this.maxDivergenceMeters = 0;
+        this.divergenceSumMeters = 0;
+        this.divergenceSamples = 0;
+        this.checkDivergenceCounter = 0;
+
+        // Section 37: Required Debug Output
+        const modeUpper = (route.mode || 'normal').toUpperCase();
+        console.log(`[ROUTE]`);
+        console.log(`Mode: ${modeUpper}`);
+        console.log(`Route ID: ${route.id || 'route-001'}`);
+        console.log(`Coordinates: ${this.routeCoordinates.length}`);
+        console.log(`Distance: ${Math.round(this.totalRouteDistance)}m`);
+        console.log(`Destination Node: ${route.destinationNodeId || navigationState?.state?.destination?.nodeId || 'destination'}`);
+        console.log(`[VEHICLE]`);
+        console.log(`Route ID: ${route.id || 'route-001'}`);
+        console.log(`Coordinates: ${this.routeCoordinates.length}`);
+        console.log(`Using EXACT route coordinates: true`);
+
+        // Initialize at origin coordinate
+        const startPt = this.routeCoordinates[0];
+        const nextPt = this.routeCoordinates[1];
+        const initialBearing = GeoUtils.calculateBearing(startPt, nextPt);
+        this._ensureMarker(startPt[0], startPt[1], initialBearing);
+        this._recordTracePoint(startPt[0], startPt[1]);
+
+        if (this.onTimelineEvent) {
+            this.onTimelineEvent(`Vehicle started navigating along ${route.distanceKm || (this.totalRouteDistance / 1000).toFixed(2)} km route`);
+        }
+
+        if (this.followVehicle && this.map) {
             this.map.panTo([startPt[0], startPt[1]], { animate: true });
         }
 
         this.animationFrameId = requestAnimationFrame((ts) => this._animationLoop(ts));
+        return true;
     }
 
     /**
-     * Create or update high-visibility SVG vehicle marker with smooth rotation
+     * Create or update high-visibility SVG vehicle marker with rotation
      */
     _ensureMarker(lat, lng, bearing = 0) {
-        if (typeof L === 'undefined') {
+        if (typeof L === 'undefined' || !this.map) {
             this.currentPosition = { lat, lng };
             this.currentBearing = bearing;
             return;
@@ -109,7 +214,7 @@ class VehicleNavigator {
             const vehicleHtml = `
                 <div class="vehicle-marker-wrapper">
                     <div class="vehicle-rotator" style="transform: rotate(${bearing}deg);">
-                        <svg class="vehicle-svg" viewBox="0 0 32 64" width="28" height="56" xmlns="http://www.w3.org/2000/svg">
+                        <svg class="vehicle-svg" viewBox="0 0 32 64" width="32" height="64" xmlns="http://www.w3.org/2000/svg">
                             <defs>
                                 <linearGradient id="carBodyGrad" x1="0%" y1="0%" x2="100%" y2="0%">
                                     <stop offset="0%" stop-color="#0284c7" />
@@ -171,8 +276,52 @@ class VehicleNavigator {
     }
 
     /**
-     * Section 9 & 10: 60fps Animation Loop with Geographic Interpolation
-     * Follows every intermediate road coordinate without cutting corners.
+     * Section 18: Record Vehicle Trace Point & Update Yellow Trace Line
+     */
+    _recordTracePoint(lat, lng) {
+        this.vehicleTrace.push([lat, lng]);
+
+        if (this.map && typeof L !== 'undefined') {
+            if (!this.tracePolyline) {
+                this.tracePolyline = L.polyline(this.vehicleTrace, {
+                    color: '#eab308',
+                    weight: 3.5,
+                    opacity: 0.9,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    dashArray: '3, 5'
+                }).addTo(this.map);
+            } else {
+                this.tracePolyline.setLatLngs(this.vehicleTrace);
+            }
+        }
+    }
+
+    /**
+     * Section 19: Verify vehicle remains within tight tolerance of route
+     */
+    _verifyVehicleOnRoute(lat, lng, p1, p2) {
+        const distMeters = GeoUtils.pointToSegmentDistanceMeters([lat, lng], p1, p2);
+
+        this.divergenceSamples++;
+        this.divergenceSumMeters += distMeters;
+        if (distMeters > this.maxDivergenceMeters) {
+            this.maxDivergenceMeters = distMeters;
+        }
+
+        if (distMeters > 50) {
+            console.error(`CRITICAL: Vehicle route divergence detected: ${distMeters.toFixed(2)}m from active route.`);
+            this.pause();
+            if (this.onTimelineEvent) {
+                this.onTimelineEvent(`CRITICAL: Vehicle route divergence detected (${distMeters.toFixed(1)}m)!`);
+            }
+        } else if (distMeters > 20) {
+            console.warn(`WARNING: Vehicle has deviated from route: ${distMeters.toFixed(2)}m.`);
+        }
+    }
+
+    /**
+     * Section 10 & 11: Distance-Based Animation Loop with requestAnimationFrame
      */
     _animationLoop(timestamp) {
         if (!this.isPlaying || this.isPaused) return;
@@ -183,77 +332,81 @@ class VehicleNavigator {
             return;
         }
 
-        const deltaSeconds = (timestamp - this.lastTimestamp) / 1000;
+        const deltaSeconds = Math.min((timestamp - this.lastTimestamp) / 1000, 0.1);
         this.lastTimestamp = timestamp;
 
-        if (this.currentSegmentIndex >= this.routeCoordinates.length - 1) {
+        const speedKmh = this.baseSpeedKmh * this.speedMultiplier;
+        const speedMps = (speedKmh * 1000) / 3600;
+
+        // Advance distance travelled based on elapsed time
+        this.distanceTravelled += speedMps * deltaSeconds;
+
+        if (this.distanceTravelled >= this.totalRouteDistance) {
+            this.distanceTravelled = this.totalRouteDistance;
+            const finalPt = this.routeCoordinates[this.routeCoordinates.length - 1];
+            this._ensureMarker(finalPt[0], finalPt[1], this.currentBearing);
+            this._recordTracePoint(finalPt[0], finalPt[1]);
             this._checkArrivalAndFinish();
             return;
         }
 
-        const p1 = this.routeCoordinates[this.currentSegmentIndex];
-        const p2 = this.routeCoordinates[this.currentSegmentIndex + 1];
-
-        const segDistanceMeters = GeoUtils.distanceMeters(p1, p2);
-        const speedKmh = this.baseSpeedKmh * this.speedMultiplier;
-        const speedMps = (speedKmh * 1000) / 3600;
-
-        // Minimum segment duration prevents skipping on micro-segments
-        const segmentDurationSec = Math.max(0.08, segDistanceMeters / speedMps);
-
-        this.segmentProgress += deltaSeconds / segmentDurationSec;
-
-        if (this.segmentProgress >= 1.0) {
-            this.currentSegmentIndex++;
-            this.segmentProgress = 0;
-
-            if (this.currentSegmentIndex >= this.routeCoordinates.length - 1) {
-                const finalPt = this.routeCoordinates[this.routeCoordinates.length - 1];
-                this._ensureMarker(finalPt[0], finalPt[1], this.currentBearing);
-                this._checkArrivalAndFinish();
-                return;
+        // Section 11: Find the two route points surrounding distanceTravelled
+        let segIndex = 0;
+        for (let i = 0; i < this.routeProgress.length - 1; i++) {
+            if (this.distanceTravelled >= this.routeProgress[i].distanceFromStart &&
+                this.distanceTravelled <= this.routeProgress[i + 1].distanceFromStart) {
+                segIndex = i;
+                break;
             }
         }
 
-        // Section 9: Geographic Interpolation along road curve
-        const curP1 = this.routeCoordinates[this.currentSegmentIndex];
-        const curP2 = this.routeCoordinates[this.currentSegmentIndex + 1];
+        const ptA = this.routeProgress[segIndex];
+        const ptB = this.routeProgress[segIndex + 1];
+        const segDist = ptB.distanceFromStart - ptA.distanceFromStart;
+        const t = segDist > 0 ? (this.distanceTravelled - ptA.distanceFromStart) / segDist : 0;
 
-        const curLat = curP1[0] + (curP2[0] - curP1[0]) * this.segmentProgress;
-        const curLng = curP1[1] + (curP2[1] - curP1[1]) * this.segmentProgress;
+        // Exact geographic interpolation between the two consecutive points along the route
+        const curLat = ptA.coordinate[0] + (ptB.coordinate[0] - ptA.coordinate[0]) * t;
+        const curLng = ptA.coordinate[1] + (ptB.coordinate[1] - ptA.coordinate[1]) * t;
 
-        // Section 11: True geodetic bearing rotation
-        const bearing = GeoUtils.calculateBearing(curP1, curP2);
+        // Section 16: Geodetic bearing calculation from current segment points
+        const bearing = GeoUtils.calculateBearing(ptA.coordinate, ptB.coordinate);
 
         this._ensureMarker(curLat, curLng, bearing);
+        this._recordTracePoint(curLat, curLng);
 
-        // Progress calculation
-        const totalSegments = this.routeCoordinates.length - 1;
-        const rawProgress = (this.currentSegmentIndex + this.segmentProgress) / totalSegments;
-        const progressPercent = Math.min(100, Math.max(0, Math.round(rawProgress * 100)));
+        // Section 19: Periodic route distance check
+        this.checkDivergenceCounter++;
+        if (this.checkDivergenceCounter % 6 === 0) {
+            this._verifyVehicleOnRoute(curLat, curLng, ptA.coordinate, ptB.coordinate);
+        }
+
+        // Section 32: Route progress based on distance travelled
+        const progressFraction = this.totalRouteDistance > 0 ? (this.distanceTravelled / this.totalRouteDistance) : 0;
+        const progressPercent = Math.min(100, Math.max(0, Math.round(progressFraction * 100)));
 
         if (this.onProgressCallback) {
             this.onProgressCallback(progressPercent, { lat: curLat, lng: curLng });
         }
 
-        // Camera follow mode
-        if (this.followVehicle) {
-            this.map.panTo([curLat, curLng], { animate: true, duration: 0.15 });
+        // Section 33: Camera follow mode
+        if (this.followVehicle && this.map) {
+            this.map.panTo([curLat, curLng], { animate: true, duration: 0.1 });
         }
 
         this.animationFrameId = requestAnimationFrame((ts) => this._animationLoop(ts));
     }
 
     /**
-     * Section 41: Destination Arrival Validation
-     * Arrival triggered when geographic distance to destination < 10 meters
+     * Section 20 & 41: Destination Arrival Validation (< 10m threshold)
      */
     _checkArrivalAndFinish() {
         this.isPlaying = false;
         this.isPaused = false;
-        this.segmentProgress = 1.0;
+        this.isArrived = true;
+        this.distanceTravelled = this.totalRouteDistance;
 
-        const destCoord = typeof navigationState !== 'undefined' && navigationState.state.destination
+        const destCoord = typeof navigationState !== 'undefined' && navigationState.state.destination?.lat
             ? [navigationState.state.destination.lat, navigationState.state.destination.lng]
             : this.routeCoordinates[this.routeCoordinates.length - 1];
 
@@ -263,21 +416,25 @@ class VehicleNavigator {
         );
 
         const destName = navigationState?.state?.destination?.name || 'Destination';
+        const avgDivergence = this.divergenceSamples > 0 ? (this.divergenceSumMeters / this.divergenceSamples) : 0;
 
         console.log(`[VEHICLE] Reached endpoint. Distance to destination: ${distToDestMeters.toFixed(1)}m`);
+        console.log(`[VEHICLE] Route Trace Verification: maxDistanceFromRoute = ${this.maxDivergenceMeters.toFixed(2)}m, avgDistanceFromRoute = ${avgDivergence.toFixed(2)}m`);
 
         if (this.onProgressCallback) {
             this.onProgressCallback(100, this.currentPosition);
         }
 
         if (this.onTimelineEvent) {
-            this.onTimelineEvent(`Arrived at ${destName} (Distance: ${distToDestMeters.toFixed(1)}m)`);
+            this.onTimelineEvent(`Arrived at ${destName} (Distance: ${distToDestMeters.toFixed(1)}m, Divergence: ${this.maxDivergenceMeters.toFixed(1)}m)`);
         }
 
         if (this.onCompleteCallback) {
             this.onCompleteCallback({
                 destinationName: destName,
-                distanceMeters: distToDestMeters
+                distanceMeters: distToDestMeters,
+                maxDivergence: this.maxDivergenceMeters,
+                avgDivergence
             });
         }
     }
@@ -301,6 +458,12 @@ class VehicleNavigator {
         console.log('[VEHICLE] Resumed');
     }
 
+    stop() {
+        this.pause();
+        this.isPlaying = false;
+        this.isPaused = false;
+    }
+
     reset() {
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
@@ -308,21 +471,24 @@ class VehicleNavigator {
         }
         this.isPlaying = false;
         this.isPaused = false;
-        this.currentSegmentIndex = 0;
-        this.segmentProgress = 0;
+        this.isArrived = false;
+        this.distanceTravelled = 0;
         this.lastTimestamp = null;
 
-        if (this.marker) {
+        if (this.marker && this.map) {
             this.map.removeLayer(this.marker);
             this.marker = null;
         }
+        if (this.tracePolyline && this.map) {
+            this.map.removeLayer(this.tracePolyline);
+            this.tracePolyline = null;
+        }
+        this.vehicleTrace = [];
         this.currentPosition = null;
-        this.activeRoute = null;
-        this.routeCoordinates = [];
     }
 
     replay() {
-        if (this.activeRoute && this.routeCoordinates.length >= 2) {
+        if (this.activeRoute && this.activeRoute.coordinates?.length >= 2) {
             this.start(this.activeRoute, this.onCompleteCallback, this.onProgressCallback);
         }
     }
@@ -334,20 +500,13 @@ class VehicleNavigator {
 
     setFollowVehicle(enabled) {
         this.followVehicle = Boolean(enabled);
-        if (this.followVehicle && this.currentPosition) {
+        if (this.followVehicle && this.currentPosition && this.map) {
             this.map.panTo([this.currentPosition.lat, this.currentPosition.lng], { animate: true });
         }
     }
 
     /**
-     * Section 12 & 40: Dynamic Vehicle Rerouting Mid-Journey
-     * When route changes:
-     * 1. Stops current animation.
-     * 2. Saves current geographic position.
-     * 3. Finds nearest point on new route.
-     * 4. Projects vehicle onto new route.
-     * 5. Replaces route coordinates with [currentPosition, ...newRouteFromNearest].
-     * 6. Continues animation seamlessly from current position without teleporting.
+     * Section 12 & 40: Dynamic Vehicle Rerouting Mid-Journey without Teleporting
      */
     updateRouteCoordinates(newRoute) {
         if (!newRoute || !newRoute.coordinates || newRoute.coordinates.length < 2) return;
@@ -383,11 +542,29 @@ class VehicleNavigator {
 
         this.activeRoute = newRoute;
         this.routeCoordinates = splicedCoords;
-        this.currentSegmentIndex = 0;
-        this.segmentProgress = 0;
+
+        // Rebuild cumulative distance array for remaining spliced journey
+        this.routeProgress = [];
+        let cumDist = 0;
+        this.routeProgress.push({
+            coordinate: this.routeCoordinates[0],
+            distanceFromStart: 0
+        });
+
+        for (let i = 1; i < this.routeCoordinates.length; i++) {
+            const dist = GeoUtils.distanceMeters(this.routeCoordinates[i - 1], this.routeCoordinates[i]);
+            cumDist += dist;
+            this.routeProgress.push({
+                coordinate: this.routeCoordinates[i],
+                distanceFromStart: cumDist
+            });
+        }
+
+        this.totalRouteDistance = cumDist;
+        this.distanceTravelled = 0;
         this.lastTimestamp = null;
 
-        console.log(`[VEHICLE] Successfully rerouted: continuing with ${splicedCoords.length} remaining coordinates`);
+        console.log(`[VEHICLE] Successfully rerouted: continuing with ${splicedCoords.length} remaining coordinates (${Math.round(this.totalRouteDistance)}m remaining)`);
 
         if (this.onTimelineEvent) {
             this.onTimelineEvent('Vehicle dynamically rerouted onto new optimal path');

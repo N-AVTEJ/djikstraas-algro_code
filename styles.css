@@ -1307,8 +1307,35 @@ body {
 }
 
 .vehicle-rotator {
-    transform-origin: center center;
-    transition: transform 0.08s linear;
+    width: 32px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: 16px 32px;
+}
+
+.btn-apply-dijkstra {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+    border-color: #10b981 !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35) !important;
+}
+
+.btn-apply-dijkstra:hover {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
+}
+
+.btn-normal-route {
+    background: rgba(30, 41, 59, 0.8) !important;
+    border-color: #3b82f6 !important;
+    color: #60a5fa !important;
+}
+
+.btn-normal-route:hover {
+    background: rgba(59, 130, 246, 0.2) !important;
 }
 
 /* Modal Dialog */

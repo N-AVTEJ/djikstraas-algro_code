@@ -3,84 +3,53 @@
  * APPLICATION MASTER CONTROLLER (js/app.js)
  * ============================================================================
  *
- * Master Orchestrator for CITYNAV:
- * - GeoUtils (js/geoUtils.js)
+ * Coordinates:
  * - CityRoadGraph (js/graph.js)
- * - NavigationStateManager (js/navigationState.js)
  * - LeafletMapManager (js/map.js)
  * - RoutingManager (js/routing.js)
  * - TrafficLightController (js/traffic.js)
  * - VehicleNavigator (js/vehicle.js)
  * - POIManager (js/pois.js)
  * - UIManager (js/ui.js)
- * - CityNavTestSuite (js/tests.js)
+ * - Single Navigation State (js/navigationState.js)
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('[CITYNAV] Initializing CityNav Navigation Simulator Engine...');
-
-    // 1. Instantiate Core Subsystems
+    // 1. Core Subsystem Instantiation
     const graph = new CityRoadGraph();
     const mapManager = new LeafletMapManager('map', graph);
     const routingManager = new RoutingManager(graph);
     const vehicle = new VehicleNavigator(mapManager.map);
     const ui = new UIManager();
-    const testSuite = new CityNavTestSuite(graph, routingManager, vehicle, mapManager);
 
-    let isVisualizing = false;
-    let vizAbortController = null;
-
-    // 2. Synchronize navigationState changes with UI & Markers
-    navigationState.addListener((type, state, data) => {
-        ui.updateTripLabels(state.start, state.destination);
-        ui.updateDebugHud(graph, state.activeRoute, vehicle);
-
-        if (type === 'start_changed') {
-            mapManager.updateStartMarker();
-        } else if (type === 'destination_changed') {
-            mapManager.updateDestinationMarker();
-            mapManager.clearRoutes();
-            vehicle.reset();
-        } else if (type === 'routes_cleared') {
-            mapManager.clearRoutes();
-        } else if (type === 'reset') {
-            mapManager.clearMarkers();
-            mapManager.clearRoutes();
-            vehicle.reset();
-        }
-    });
-
-    // 3. Instantiate POI & Search Manager
-    const poiManager = new POIManager(mapManager.map, (nodeId, type) => {
-        const node = graph.roadNetwork.nodes[nodeId];
-        if (!node) return;
-
+    // POI Manager with direct start/destination setter callback
+    const poiManager = new POIManager(mapManager.map, graph, (node, type) => {
         if (type === 'start') {
-            navigationState.setStart(node);
-            ui.showBanner(`🟢 Start set to: <b>${node.name}</b>`, 'success');
-            ui.addTimelineEvent(`Selected start location: ${node.name}`);
-            if (navigationState.state.destination.nodeId) calculateAndRenderRoutes();
+            setOriginNode(node);
         } else if (type === 'end') {
-            navigationState.setDestination(node);
-            ui.showBanner(`🔴 Destination set to: <b>${node.name}</b>`, 'success');
-            ui.addTimelineEvent(`Selected destination: ${node.name}`);
-            if (navigationState.state.start.nodeId) calculateAndRenderRoutes();
+            setDestinationNode(node);
         }
     });
 
-    // 4. Traffic Light Controller & 3-Second Automated Cycle (Section 18)
+    let currentRoutesResult = null;
+    let isVisualizing = false;
+    let vizAbort = false;
+
+    // 2. Traffic Light Manager with dynamic rerouting callback
     const trafficController = new TrafficLightController(graph, (event) => {
+        // Re-render visual traffic light states on the map
         mapManager.renderRoadNetwork();
 
-        // If an active route exists, evaluate dynamic rerouting
-        if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId && !isVisualizing) {
-            handleDynamicTrafficRecalculate();
+        // Dynamically recalculate route if active
+        if (mapManager.startNodeId && mapManager.endNodeId && !isVisualizing) {
+            handleDynamicTrafficRecalculate(event);
         }
     });
 
+    // Start 3-second automatic traffic cycling
     trafficController.start();
 
-    // 5. Map Click & Road Snapping (Section 3 & 43)
+    // 3. Map Click & Snapping Handler
     mapManager.onMapClickCallback = (latlng) => {
         handleMapClick(latlng.lat, latlng.lng);
     };
@@ -98,31 +67,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const tool = ui.currentTool;
 
         if (tool === 'start' || tool === 'end') {
-            const snap = graph.snapPointToRoad(lat, lng);
-            if (!snap.success || !snap.node) {
-                ui.showBanner('⚠️ Please click closer to a road in the Central Hyderabad network.', 'warning');
+            const candidate = graph.findNearestRoadAndNode(lat, lng);
+            if (!candidate || !candidate.node) {
+                ui.showBanner('⚠️ Click nearer to the city road network.', 'warning');
                 return;
             }
 
-            mapManager.showSnapIndicator(lat, lng, snap.snappedLat, snap.snappedLng);
+            // Visual snap ripple indicator
+            mapManager.showSnapIndicator(lat, lng, candidate.snappedLat, candidate.snappedLng);
 
             if (tool === 'start') {
-                navigationState.setStart(snap.node, [snap.snappedLat, snap.snappedLng]);
-                ui.showBanner(`🟢 Start snapped to road at: <b>${snap.node.name}</b>`, 'success');
-                ui.addTimelineEvent(`Snapped start to road: ${snap.node.name}`);
-                if (navigationState.state.destination.nodeId) calculateAndRenderRoutes();
+                setOriginNode(candidate.node, candidate.snappedLat, candidate.snappedLng);
             } else if (tool === 'end') {
-                navigationState.setDestination(snap.node, [snap.snappedLat, snap.snappedLng]);
-                ui.showBanner(`🔴 Destination snapped to road at: <b>${snap.node.name}</b>`, 'success');
-                ui.addTimelineEvent(`Snapped destination to road: ${snap.node.name}`);
-                if (navigationState.state.start.nodeId) calculateAndRenderRoutes();
+                setDestinationNode(candidate.node, candidate.snappedLat, candidate.snappedLng);
             }
         } else if (tool === 'traffic-light') {
-            const snap = graph.snapPointToRoad(lat, lng);
-            if (snap.success && snap.node) handleNodeClick(snap.node);
+            const candidate = graph.findNearestRoadAndNode(lat, lng);
+            if (candidate && candidate.node) {
+                handleNodeClick(candidate.node);
+            }
         } else if (tool === 'shortcut' || tool === 'block') {
-            const snap = graph.snapPointToRoad(lat, lng);
-            if (snap.success && snap.edge) handleEdgeClick(snap.edge);
+            const candidate = graph.findNearestRoadAndNode(lat, lng);
+            if (candidate && candidate.edge) {
+                handleEdgeClick(candidate.edge);
+            } else if (candidate && candidate.node) {
+                handleNodeClick(candidate.node);
+            }
+        } else if (tool === 'select') {
+            const candidate = graph.findNearestRoadAndNode(lat, lng);
+            if (candidate && candidate.node) {
+                ui.showBanner(`📍 Intersection: <b>${candidate.node.name}</b> (ID: <code>${candidate.node.id}</code>)`, 'info');
+            }
         }
     }
 
@@ -132,37 +107,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         switch (tool) {
             case 'start':
-                navigationState.setStart(node);
-                ui.showBanner(`🟢 Start set to: <b>${node.name}</b>`, 'success');
-                ui.addTimelineEvent(`Start: ${node.name}`);
-                if (navigationState.state.destination.nodeId) calculateAndRenderRoutes();
+                setOriginNode(node);
                 break;
 
             case 'end':
-                navigationState.setDestination(node);
-                ui.showBanner(`🔴 Destination set to: <b>${node.name}</b>`, 'success');
-                ui.addTimelineEvent(`Destination: ${node.name}`);
-                if (navigationState.state.start.nodeId) calculateAndRenderRoutes();
+                setDestinationNode(node);
                 break;
 
             case 'traffic-light':
-                if (node.trafficSignalId) {
-                    trafficController.switchLight(node.id);
-                    mapManager.renderRoadNetwork();
-                    const sig = graph.roadNetwork.signals[node.trafficSignalId];
-                    ui.showBanner(`🚦 Switched signal at <b>${node.name}</b> to <b>${sig.state}</b> (+${sig.delays[sig.state.toLowerCase()]}s delay)`, 'info');
-                    ui.addTimelineEvent(`Traffic light at ${node.name} switched to ${sig.state}`);
-                } else {
-                    const res = trafficController.toggleTrafficLight(node.id);
-                    if (res) {
-                        mapManager.renderRoadNetwork();
-                        ui.showBanner(`🚦 Added Traffic Signal at <b>${node.name}</b> (Green 0s, Yellow 10s, Red 30s)`, 'info');
-                        ui.addTimelineEvent(`Added traffic signal at ${node.name}`);
-                    } else {
-                        ui.showBanner(`⚠️ Cannot place signal: Intersection must have >= 2 connected road edges.`, 'warning');
-                    }
-                }
-                if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
+                trafficController.switchLight(node.id);
+                mapManager.renderRoadNetwork();
+                const updatedState = (graph.roadNetwork.signals?.[node.trafficSignalId]?.state || 'YELLOW').toUpperCase();
+                ui.showBanner(`🚦 Traffic Light at <b>${node.name}</b> switched to <b>${updatedState}</b>.`, 'info');
+                ui.addTimelineEvent(`🚦 Traffic Light at ${node.name} switched to ${updatedState}.`);
+                if (mapManager.startNodeId && mapManager.endNodeId) {
                     calculateAndRenderRoutes();
                 }
                 break;
@@ -170,17 +128,16 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'block':
                 node.blocked = !node.blocked;
                 mapManager.renderRoadNetwork();
-                ui.showBanner(`🚧 ${node.blocked ? 'Blocked' : 'Unblocked'} intersection: <b>${node.name}</b>`, 'warning');
-                ui.addTimelineEvent(`${node.blocked ? 'Blocked' : 'Unblocked'} intersection ${node.name}`);
-                if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
+                ui.showBanner(`🧱 ${node.blocked ? 'Blocked' : 'Unblocked'} intersection: <b>${node.name}</b>.`, 'warning');
+                ui.addTimelineEvent(`🧱 ${node.blocked ? 'Blocked' : 'Unblocked'} intersection ${node.name}.`, 'hazard');
+                if (mapManager.startNodeId && mapManager.endNodeId) {
                     calculateAndRenderRoutes();
                 }
                 break;
 
-            case 'inspect':
+            case 'select':
             default:
-                const sig = node.trafficSignalId ? graph.roadNetwork.signals[node.trafficSignalId] : null;
-                ui.showBanner(`📍 Intersection: <b>${node.name}</b> | Connected Roads: ${node.connectedEdges?.length || 0} | Signal: ${sig ? sig.state : 'None'} | Blocked: ${node.blocked}`, 'info');
+                ui.showBanner(`📍 Intersection: <b>${node.name}</b> | Signals: ${node.trafficLight ? node.trafficState.toUpperCase() : 'None'} | Blocked: ${node.blocked}`, 'info');
                 break;
         }
     }
@@ -192,325 +149,324 @@ document.addEventListener('DOMContentLoaded', () => {
         switch (tool) {
             case 'block':
                 edge.blocked = !edge.blocked;
+                const revEdge = graph.edges.get(`${edge.to}--${edge.from}`);
+                if (revEdge) revEdge.blocked = edge.blocked;
+                if (graph.roadNetwork.edges[edge.id]) graph.roadNetwork.edges[edge.id].blocked = edge.blocked;
+                if (graph.roadNetwork.edges[`${edge.to}--${edge.from}`]) graph.roadNetwork.edges[`${edge.to}--${edge.from}`].blocked = edge.blocked;
+
                 mapManager.renderRoadNetwork();
-                ui.showBanner(`🚧 ${edge.blocked ? 'Blocked road' : 'Unblocked road'}: <b>${edge.name}</b> (Weight: ${edge.blocked ? '∞' : edge.distanceKm + 'km'})`, 'warning');
-                ui.addTimelineEvent(`Road blockade toggled on ${edge.name}`);
-                if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
+                ui.showBanner(`🧱 ${edge.blocked ? 'Blocked' : 'Unblocked'} road: <b>${edge.name}</b> (Weight: ${edge.blocked ? '∞' : 'Normal'}).`, 'warning');
+                ui.addTimelineEvent(`🧱 ${edge.blocked ? 'Blocked' : 'Unblocked'} road ${edge.name}.`, 'hazard');
+                if (mapManager.startNodeId && mapManager.endNodeId) {
                     calculateAndRenderRoutes();
                 }
                 break;
 
             case 'shortcut':
-                edge.shortcut = !edge.shortcut;
-                edge.roadType = edge.shortcut ? 'shortcut' : 'normal';
-                edge.speedKmh = edge.shortcut ? 65 : 45;
+                const isShortcut = !edge.shortcut && edge.roadType !== 'shortcut';
+                edge.shortcut = isShortcut;
+                edge.roadType = isShortcut ? 'shortcut' : 'normal';
+                edge.speedKmh = isShortcut ? 65 : 45;
+
+                const revShortcut = graph.edges.get(`${edge.to}--${edge.from}`);
+                if (revShortcut) {
+                    revShortcut.shortcut = isShortcut;
+                    revShortcut.roadType = edge.roadType;
+                    revShortcut.speedKmh = edge.speedKmh;
+                }
+
+                if (graph.roadNetwork.edges[edge.id]) {
+                    graph.roadNetwork.edges[edge.id].shortcut = isShortcut;
+                    graph.roadNetwork.edges[edge.id].roadType = edge.roadType;
+                    graph.roadNetwork.edges[edge.id].speedKmh = edge.speedKmh;
+                }
+
                 mapManager.renderRoadNetwork();
-                ui.showBanner(`⚡ ${edge.shortcut ? 'Enabled Express Shortcut (65 km/h bypass)' : 'Restored Normal Road'}: <b>${edge.name}</b>`, 'success');
-                ui.addTimelineEvent(`Shortcut ${edge.shortcut ? 'enabled' : 'disabled'} on ${edge.name}`);
-                if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
+                ui.showBanner(`⚡ ${isShortcut ? 'Enabled Express Shortcut (65 km/h)' : 'Restored Normal Road'}: <b>${edge.name}</b>.`, 'success');
+                ui.addTimelineEvent(`⚡ ${isShortcut ? 'Activated Express Shortcut' : 'Restored Normal Road'} on ${edge.name}.`);
+                if (mapManager.startNodeId && mapManager.endNodeId) {
                     calculateAndRenderRoutes();
                 }
                 break;
 
-            case 'inspect':
+            case 'select':
             default:
-                ui.showBanner(`🛣️ Road: <b>${edge.name}</b> | Speed: ${edge.speedKmh} km/h | Dist: ${edge.distanceKm} km | Blocked: ${edge.blocked}`, 'info');
+                ui.showBanner(`🛣️ Road: <b>${edge.name}</b> | Dist: ${(edge.distanceMeters / 1000).toFixed(2)} km | Speed: ${edge.speedKmh || 45} km/h | Blocked: ${edge.blocked}`, 'info');
                 break;
         }
     }
 
-    // Section 21: Normal Route Flow (Casual / Standard Road baseline)
-    function handleCalculateNormalRoute() {
-        const startNodeId = navigationState.state.start.nodeId;
-        const targetNodeId = navigationState.state.destination.nodeId;
+    function setOriginNode(node, snappedLat = null, snappedLng = null) {
+        mapManager.setStartMarker(node, snappedLat, snappedLng);
+        navigationState.setStart(node, snappedLat ? [snappedLat, snappedLng] : null);
 
-        if (!startNodeId || !targetNodeId) {
-            ui.showBanner('⚠️ Please select both a Start and Destination point.', 'warning');
-            return null;
+        ui.showBanner(`🟢 Origin snapped to road: <b>${node.name}</b>.`, 'success');
+        ui.addTimelineEvent(`🟢 Origin set to ${node.name}.`);
+
+        if (mapManager.endNodeId) {
+            calculateAndRenderRoutes();
         }
-
-        vehicle.stop();
-        ui.setActiveMode('normal');
-        ui.setStatusBadge('CALCULATING', 'badge-calculating');
-
-        const routes = routingManager.computeRoutes(startNodeId, targetNodeId);
-        mapManager.clearRoutes();
-
-        const normalRes = routes.normal;
-        if (normalRes && normalRes.success) {
-            navigationState.setRoutes(normalRes, routes.dijkstra, 'normal');
-            mapManager.renderNormalRoute(normalRes);
-            ui.setStatusBadge('NORMAL ROUTE', 'badge-ready');
-            ui.showBanner(`🔵 Normal Route loaded: <b>${normalRes.distanceKm} km, ~${normalRes.estimatedTimeMin} min</b>. Click <b>▶️ Start Drive</b> or <b>⚡ Apply Dijkstra</b>!`, 'info');
-            ui.updateComparisonAndExplainability(routes.comparison);
-            ui.updateTelemetry(normalRes);
-            ui.updateDebugHud(graph, normalRes, vehicle);
-            mapManager.fitRoute(normalRes.coordinates);
-        } else {
-            ui.setStatusBadge('NO ROUTE', 'badge-error');
-            ui.showBanner(`⚠️ ${normalRes?.error || 'No route found.'}`, 'error');
-            ui.updateComparisonAndExplainability(null);
-            vehicle.reset();
-            ui.updateDebugHud(graph, null, vehicle);
-        }
-        return routes;
     }
 
-    // Section 22: Apply Dijkstra Flow (Travel-time and traffic dynamic optimization)
-    function handleApplyDijkstra(recordSteps = false) {
-        const startNodeId = navigationState.state.start.nodeId;
-        const targetNodeId = navigationState.state.destination.nodeId;
+    function setDestinationNode(node, snappedLat = null, snappedLng = null) {
+        mapManager.setEndMarker(node, snappedLat, snappedLng);
+        navigationState.setDestination(node, snappedLat ? [snappedLat, snappedLng] : null);
 
-        if (!startNodeId || !targetNodeId) {
-            ui.showBanner('⚠️ Please select both a Start and Destination point.', 'warning');
+        ui.showBanner(`🔴 Destination snapped to road: <b>${node.name}</b>.`, 'success');
+        ui.addTimelineEvent(`🔴 Destination set to ${node.name}.`);
+
+        if (mapManager.startNodeId) {
+            calculateAndRenderRoutes();
+        }
+    }
+
+    // 4. Compute Routes & Update Displays
+    function calculateAndRenderRoutes(options = {}) {
+        if (!mapManager.startNodeId || !mapManager.endNodeId) {
+            ui.showBanner('⚠️ Please select both Start and Destination points.', 'warning');
             return null;
         }
 
-        const wasArrived = vehicle.isArrived;
-        vehicle.stop();
-
-        // Section 23: Destination remains strictly unchanged
-        ui.setActiveMode('dijkstra');
         ui.setStatusBadge('CALCULATING', 'badge-calculating');
 
-        const routes = routingManager.computeRoutes(startNodeId, targetNodeId, recordSteps);
-        mapManager.clearRoutes();
+        const routes = routingManager.computeRoutes(
+            mapManager.startNodeId,
+            mapManager.endNodeId,
+            options
+        );
 
-        const dijkstraRes = routes.dijkstra;
-        if (dijkstraRes && dijkstraRes.success) {
-            vehicle.validateRoute(dijkstraRes);
-            navigationState.setRoutes(routes.normal, dijkstraRes, 'dijkstra');
-            mapManager.renderDijkstraRoute(dijkstraRes);
+        currentRoutesResult = routes;
+        navigationState.state.activeRoute = routes.dijkstra.success ? routes.dijkstra : routes.normal;
 
+        const startNode = graph.nodes.get(mapManager.startNodeId);
+        const endNode = graph.nodes.get(mapManager.endNodeId);
+
+        if (routes.dijkstra.success || routes.normal.success) {
+            mapManager.renderRoutes(routes, ui.currentMode);
             ui.setStatusBadge('OPTIMAL ROUTE', 'badge-ready');
-            ui.showBanner(`🟢 Dijkstra Fastest Route applied! Distance: <b>${dijkstraRes.distanceKm} km</b> | ETA: <b>${dijkstraRes.estimatedTimeMin} min</b>.`, 'success');
-            ui.addTimelineEvent(`Applied Dijkstra: optimal path found (${dijkstraRes.estimatedTimeMin} min)`);
-            ui.updateComparisonAndExplainability(routes.comparison);
-            ui.updateTelemetry(dijkstraRes);
-            ui.updateDebugHud(graph, dijkstraRes, vehicle);
-            mapManager.fitRoute(dijkstraRes.coordinates);
+            ui.updateTelemetry(routes, startNode, endNode);
 
-            if (wasArrived) {
-                ui.showBanner(`🏁 Dijkstra route calculated. Ready to drive! Click <b>▶️ Start Drive</b> or <b>🔄 Replay</b>.`, 'success');
-            }
+            const active = (ui.currentMode === 'normal') ? routes.normal : routes.dijkstra;
+            ui.showBanner(`✅ Route calculated! ${active.label}: <b>${active.totalDistanceKm} km</b> • <b>~${active.estimatedTimeMin} min</b>`, 'success');
         } else {
-            ui.setStatusBadge('NO ROUTE', 'badge-error');
-            ui.showBanner(`⚠️ ${dijkstraRes?.error || 'No route found.'}`, 'error');
-            ui.updateComparisonAndExplainability(null);
+            mapManager.clearRoutes();
             vehicle.reset();
-            ui.updateDebugHud(graph, null, vehicle);
-        }
-        return routes;
-    }
-
-    // 6. Dual Route Calculation & Rendering (Sections 4, 21, 22, 48)
-    function calculateAndRenderRoutes(recordSteps = false) {
-        const startNodeId = navigationState.state.start.nodeId;
-        const targetNodeId = navigationState.state.destination.nodeId;
-
-        if (!startNodeId || !targetNodeId) {
-            ui.showBanner('⚠️ Please select both a Start and Destination point.', 'warning');
-            return null;
-        }
-
-        if (ui.currentMode === 'normal') {
-            return handleCalculateNormalRoute();
-        } else if (ui.currentMode === 'dijkstra') {
-            return handleApplyDijkstra(recordSteps);
-        }
-
-        ui.setStatusBadge('CALCULATING', 'badge-calculating');
-        const routes = routingManager.computeRoutes(startNodeId, targetNodeId, recordSteps);
-        mapManager.clearRoutes();
-
-        const dijkstraRes = routes.dijkstra;
-        const normalRes = routes.normal;
-
-        if (routes.success && dijkstraRes && dijkstraRes.success) {
-            if (normalRes && normalRes.success) mapManager.renderNormalRoute(normalRes);
-            mapManager.renderDijkstraRoute(dijkstraRes);
-            ui.setStatusBadge('COMPARING', 'badge-ready');
-            ui.showBanner(`⚖️ Comparing Routes: Normal (Blue) vs Dijkstra Fastest (Green). Time Saved: <b>${routes.comparison?.timeSavedMin || 0} min</b>.`, 'success');
-
-            ui.updateComparisonAndExplainability(routes.comparison);
-            ui.updateTelemetry(dijkstraRes);
-            ui.updateDebugHud(graph, dijkstraRes, vehicle);
-            mapManager.fitRoute(dijkstraRes.coordinates);
-        } else {
             ui.setStatusBadge('NO ROUTE', 'badge-error');
-            const errMsg = dijkstraRes?.error || routes.error || 'No route found.';
-            ui.showBanner(`⚠️ ${errMsg}`, 'error');
-            ui.updateComparisonAndExplainability(null);
-            vehicle.reset();
-            ui.updateDebugHud(graph, null, vehicle);
+            ui.updateTelemetry(routes, startNode, endNode);
+            ui.showBanner(`⚠️ ${routes.dijkstra.error || 'No passable route between points.'}`, 'error');
+            ui.addTimelineEvent(`⚠️ Route obstructed: No passable path available.`, 'hazard');
         }
 
         return routes;
     }
 
-    // 7. Dynamic Traffic Recalculation & Vehicle Synchronization (Section 12, 18, 40)
-    function handleDynamicTrafficRecalculate() {
-        const startNodeId = navigationState.state.start.nodeId;
-        const targetNodeId = navigationState.state.destination.nodeId;
-        if (!startNodeId || !targetNodeId) return;
+    // Dynamic Traffic Light Recalculation
+    function handleDynamicTrafficRecalculate(event) {
+        if (!mapManager.startNodeId || !mapManager.endNodeId) return;
 
-        const prevDijkstra = navigationState.state.dijkstraRoute;
+        const prevDijkstra = currentRoutesResult?.dijkstra;
         const prevPathKey = prevDijkstra?.pathNodeIds?.join('->');
         const prevTime = prevDijkstra?.estimatedTimeMin;
 
-        const routes = routingManager.computeRoutes(startNodeId, targetNodeId);
-        const newDijkstra = routes.dijkstra;
+        const newRoutes = routingManager.computeRoutes(mapManager.startNodeId, mapManager.endNodeId);
 
-        if (newDijkstra && newDijkstra.success) {
-            const newPathKey = newDijkstra.pathNodeIds.join('->');
+        if (newRoutes.dijkstra.success) {
+            const newPathKey = newRoutes.dijkstra.pathNodeIds.join('->');
             const pathChanged = prevPathKey !== newPathKey;
-            const timeChanged = prevTime !== newDijkstra.estimatedTimeMin;
+            const timeDiff = prevTime !== undefined ? Number((prevTime - newRoutes.dijkstra.estimatedTimeMin).toFixed(1)) : 0;
 
-            if (pathChanged || timeChanged) {
-                mapManager.clearRoutes();
+            currentRoutesResult = newRoutes;
+            mapManager.renderRoutes(newRoutes, ui.currentMode);
 
-                if (ui.currentMode === 'normal' && routes.normal?.success) {
-                    mapManager.renderNormalRoute(routes.normal);
-                } else if (ui.currentMode === 'compare') {
-                    if (routes.normal?.success) mapManager.renderNormalRoute(routes.normal);
-                    mapManager.renderDijkstraRoute(newDijkstra);
-                } else {
-                    mapManager.renderDijkstraRoute(newDijkstra);
-                }
+            const startNode = graph.nodes.get(mapManager.startNodeId);
+            const endNode = graph.nodes.get(mapManager.endNodeId);
+            ui.updateTelemetry(newRoutes, startNode, endNode);
 
-                ui.updateComparisonAndExplainability(routes.comparison);
-                ui.updateTelemetry(newDijkstra);
-                ui.updateDebugHud(graph, newDijkstra, vehicle);
+            if (pathChanged) {
+                ui.showBanner(`⚡ Traffic light changed! Dijkstra rerouted via faster alternative (New ETA: ~${newRoutes.dijkstra.estimatedTimeMin} min).`, 'info');
+                ui.addTimelineEvent(`⚡ Dynamic Reroute: Signal change triggered path recalculation via alternative corridor.`, 'warning');
 
-                if (pathChanged) {
-                    ui.showBanner(`⚡ Traffic signal changed — Dijkstra recalculated route! New ETA: <b>${newDijkstra.estimatedTimeMin} min</b>`, 'info');
-                    ui.addTimelineEvent(`Signal change triggered dynamic reroute (ETA: ${newDijkstra.estimatedTimeMin}m)`);
-
-                    // Section 12 & 40: Seamlessly update moving vehicle from current position
-                    if (vehicle.isPlaying) {
-                        vehicle.updateRouteCoordinates(newDijkstra);
-                    }
+                // Smoothly update vehicle path mid-drive
+                if (vehicle.isPlaying) {
+                    vehicle.updateRouteCoordinates(newRoutes.dijkstra.coordinates);
                 }
             }
         }
     }
 
-    // 8. Search Input & Autocomplete
-    let searchDebounce = null;
-    ui.elements.searchInput?.addEventListener('input', (e) => {
-        clearTimeout(searchDebounce);
-        const val = e.target.value;
+    // 5. Search Bar Autocomplete Integration
+    if (ui.elements.searchInput) {
+        ui.elements.searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            if (query.length === 0) {
+                ui.elements.btnClearSearch.classList.add('hidden');
+                ui.elements.searchDropdown.classList.add('hidden');
+                ui.elements.searchDropdown.innerHTML = '';
+                return;
+            }
 
-        if (val.length > 0) {
-            ui.elements.btnClearSearch?.classList.remove('hidden');
-        } else {
-            ui.elements.btnClearSearch?.classList.add('hidden');
-            ui.elements.searchDropdown?.classList.add('hidden');
-            return;
-        }
+            ui.elements.btnClearSearch.classList.remove('hidden');
+            const matches = poiManager.search(query);
 
-        searchDebounce = setTimeout(() => {
-            const results = poiManager.search(val);
-            renderSearchResults(results);
-        }, 150);
-    });
+            if (matches.length === 0) {
+                ui.elements.searchDropdown.innerHTML = `<div class="search-result-item"><span class="search-item-title">No locations found</span></div>`;
+                ui.elements.searchDropdown.classList.remove('hidden');
+                return;
+            }
 
-    ui.elements.btnClearSearch?.addEventListener('click', () => {
-        if (ui.elements.searchInput) ui.elements.searchInput.value = '';
-        ui.elements.btnClearSearch?.classList.add('hidden');
-        ui.elements.searchDropdown?.classList.add('hidden');
-    });
-
-    function renderSearchResults(results) {
-        const dropdown = ui.elements.searchDropdown;
-        if (!dropdown) return;
-
-        if (!results || results.length === 0) {
-            dropdown.innerHTML = `<div class="search-dropdown-item"><span class="search-item-desc">No places found matching query</span></div>`;
-            dropdown.classList.remove('hidden');
-            return;
-        }
-
-        dropdown.innerHTML = '';
-        results.slice(0, 6).forEach(poi => {
-            const item = document.createElement('div');
-            item.className = 'search-dropdown-item';
-            item.innerHTML = `
-                <span class="search-item-icon">${poi.icon}</span>
-                <div class="search-item-content">
-                    <div class="search-item-title">${poi.name}</div>
-                    <div class="search-item-desc">${poi.description}</div>
+            ui.elements.searchDropdown.innerHTML = matches.map(m => `
+                <div class="search-result-item" data-id="${m.id}" data-lat="${m.lat}" data-lng="${m.lng}" data-node="${m.nearestNode || m.nodeId || ''}">
+                    <span class="search-item-icon">${m.icon || '📍'}</span>
+                    <div class="search-item-info">
+                        <div class="search-item-title">${m.title}</div>
+                        <div class="search-item-subtitle">${m.subtitle}</div>
+                    </div>
+                    <div class="search-item-actions">
+                        <button class="btn btn-sm btn-quick-start" title="Set as Start">🟢 Start</button>
+                        <button class="btn btn-sm btn-quick-dest" title="Set as Destination">🔴 Dest</button>
+                    </div>
                 </div>
-                <span class="search-item-badge">${poi.category}</span>
-            `;
-            item.onclick = () => {
-                dropdown.classList.add('hidden');
-                poiManager.focusPOI(poi.id);
-            };
-            dropdown.appendChild(item);
-        });
+            `).join('');
 
-        dropdown.classList.remove('hidden');
+            ui.elements.searchDropdown.classList.remove('hidden');
+
+            // Wire click handlers for search result buttons
+            ui.elements.searchDropdown.querySelectorAll('.search-result-item').forEach(item => {
+                const lat = parseFloat(item.dataset.lat);
+                const lng = parseFloat(item.dataset.lng);
+                const targetNodeId = item.dataset.node;
+
+                const btnStart = item.querySelector('.btn-quick-start');
+                const btnDest = item.querySelector('.btn-quick-dest');
+
+                function resolveNode() {
+                    let node = targetNodeId ? graph.nodes.get(targetNodeId) : null;
+                    if (!node) {
+                        const candidate = graph.findNearestRoadAndNode(lat, lng);
+                        node = candidate?.node;
+                    }
+                    return node;
+                }
+
+                if (btnStart) {
+                    btnStart.onclick = (ev) => {
+                        ev.stopPropagation();
+                        const node = resolveNode();
+                        if (node) setOriginNode(node, lat, lng);
+                        ui.elements.searchDropdown.classList.add('hidden');
+                    };
+                }
+
+                if (btnDest) {
+                    btnDest.onclick = (ev) => {
+                        ev.stopPropagation();
+                        const node = resolveNode();
+                        if (node) setDestinationNode(node, lat, lng);
+                        ui.elements.searchDropdown.classList.add('hidden');
+                    };
+                }
+
+                item.onclick = () => {
+                    mapManager.map.flyTo([lat, lng], 16, { duration: 0.8 });
+                    ui.elements.searchDropdown.classList.add('hidden');
+                };
+            });
+        });
     }
 
+    // Hide search dropdown on outer click
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.search-container')) {
             ui.elements.searchDropdown?.classList.add('hidden');
         }
     });
 
-    // 9. Vehicle Controls & Drive Simulation (Sections 8, 9, 10, 11, 41)
-    ui.elements.btnVehiclePlay?.addEventListener('click', () => {
-        const targetRoute = ui.currentMode === 'normal'
-            ? navigationState.state.normalRoute
-            : navigationState.state.dijkstraRoute;
+    // 6. Routing Mode Switch Listener
+    ui.elements.modeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.mode;
+            if (currentRoutesResult) {
+                mapManager.renderRoutes(currentRoutesResult, mode);
+                const startNode = graph.nodes.get(mapManager.startNodeId);
+                const endNode = graph.nodes.get(mapManager.endNodeId);
+                ui.updateTelemetry(currentRoutesResult, startNode, endNode);
+            }
+        });
+    });
 
-        if (!targetRoute || !targetRoute.success) {
-            ui.showBanner('⚠️ Calculate a valid route before starting vehicle drive.', 'warning');
+    // 7. Vehicle Simulation Controls
+    ui.elements.btnVehiclePlay?.addEventListener('click', () => {
+        const activeRoute = (ui.currentMode === 'normal') ? currentRoutesResult?.normal : currentRoutesResult?.dijkstra;
+
+        if (!activeRoute || !activeRoute.success || !activeRoute.coordinates) {
+            ui.showBanner('⚠️ Calculate a valid route before starting vehicle simulation.', 'warning');
             return;
         }
 
         if (vehicle.isPaused) {
             vehicle.resume();
-            ui.showBanner('🚗 Resumed vehicle simulation.', 'info');
+            ui.showBanner('🚗 Vehicle driving resumed.', 'info');
+            ui.addTimelineEvent('🚗 Vehicle drive resumed.');
             return;
         }
 
-        ui.showBanner('🚗 Vehicle driving smoothly along exact road coordinates...', 'info');
+        ui.showBanner(`🚗 Vehicle animating along road coordinates (${activeRoute.label})...`, 'info');
+        ui.addTimelineEvent(`🚗 Vehicle departed from [${activeRoute.startNode?.name || 'Origin'}] along ${activeRoute.label}.`);
+
         vehicle.start(
-            targetRoute,
-            (result) => {
-                // Section 41: Destination arrival message
-                ui.showBanner(`🏁 <b>Arrived at ${result.destinationName}!</b> (Distance: ${result.distanceMeters.toFixed(1)}m)`, 'success');
+            activeRoute.coordinates,
+            () => {
+                ui.showBanner('🏁 Vehicle reached Destination successfully!', 'success');
+                ui.addTimelineEvent(`🏁 Arrived at Destination [${activeRoute.targetNode?.name || 'Destination'}]!`);
+                ui.updateVehicleProgress(100);
             },
-            (percent) => {
-                ui.updateProgressBar(percent);
+            (prog) => {
+                ui.updateVehicleProgress(prog);
             }
         );
-
-        ui.updateDebugHud(graph, targetRoute, vehicle);
     });
 
     ui.elements.btnVehiclePause?.addEventListener('click', () => {
         vehicle.pause();
-        ui.showBanner('⏸️ Simulation paused.', 'info');
+        ui.showBanner('⏸️ Vehicle simulation paused.', 'info');
+        ui.addTimelineEvent('⏸️ Vehicle simulation paused.');
     });
 
     ui.elements.btnVehicleReset?.addEventListener('click', () => {
         vehicle.reset();
-        ui.updateProgressBar(0);
+        ui.updateVehicleProgress(0);
         ui.showBanner('⏹️ Vehicle reset to origin.', 'info');
-        ui.updateDebugHud(graph, navigationState.state.activeRoute, vehicle);
     });
 
     ui.elements.btnVehicleReplay?.addEventListener('click', () => {
-        vehicle.replay();
-        ui.showBanner('🔄 Replaying route simulation.', 'info');
+        const activeRoute = (ui.currentMode === 'normal') ? currentRoutesResult?.normal : currentRoutesResult?.dijkstra;
+        if (!activeRoute || !activeRoute.success) return;
+
+        vehicle.reset();
+        ui.updateVehicleProgress(0);
+        ui.addTimelineEvent('🔁 Replaying route from start.');
+
+        setTimeout(() => {
+            vehicle.start(
+                activeRoute.coordinates,
+                () => {
+                    ui.showBanner('🏁 Replay completed!', 'success');
+                    ui.updateVehicleProgress(100);
+                },
+                (prog) => {
+                    ui.updateVehicleProgress(prog);
+                }
+            );
+        }, 150);
     });
 
     ui.elements.speedBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            vehicle.setSpeed(btn.dataset.speed);
+            ui.elements.speedBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const speed = parseFloat(btn.dataset.speed);
+            vehicle.setSpeed(speed);
+            ui.showBanner(`Vehicle animation speed set to ${speed}x.`, 'info');
         });
     });
 
@@ -518,52 +474,13 @@ document.addEventListener('DOMContentLoaded', () => {
         vehicle.setFollowVehicle(e.target.checked);
     });
 
-    vehicle.onTimelineEvent = (msg) => {
-        ui.addTimelineEvent(msg);
-    };
-
-    // 10. Routing Mode Selector
-    ui.elements.btnModeNormal?.addEventListener('click', () => {
-        if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
-            handleCalculateNormalRoute();
-        }
-    });
-    ui.elements.btnModeDijkstra?.addEventListener('click', () => {
-        if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
-            handleApplyDijkstra();
-        }
-    });
-    ui.elements.btnModeCompare?.addEventListener('click', () => {
-        if (navigationState.state.start.nodeId && navigationState.state.destination.nodeId) {
-            ui.setActiveMode('compare');
-            calculateAndRenderRoutes();
-        }
-    });
-
-    // 11. Toolbar Action Buttons
-    ui.elements.btnApplyDijkstra?.addEventListener('click', () => {
-        handleApplyDijkstra();
-    });
-
-    ui.elements.btnCalculateNormal?.addEventListener('click', () => {
-        handleCalculateNormalRoute();
-    });
-
-    ui.elements.btnCalculateRoute?.addEventListener('click', () => {
-        handleApplyDijkstra();
-    });
-
-    ui.elements.btnSwapLocations?.addEventListener('click', () => {
-        if (navigationState.swapLocations()) {
-            mapManager.updateStartMarker();
-            mapManager.updateDestinationMarker();
-            ui.addTimelineEvent('Swapped start and destination points');
-            calculateAndRenderRoutes();
-        }
+    // 8. Toolbar Actions
+    ui.elements.btnRunDijkstra?.addEventListener('click', () => {
+        calculateAndRenderRoutes();
     });
 
     ui.elements.btnFitRoute?.addEventListener('click', () => {
-        const activeRoute = navigationState.state.activeRoute || navigationState.state.dijkstraRoute || navigationState.state.normalRoute;
+        const activeRoute = (ui.currentMode === 'normal') ? currentRoutesResult?.normal : currentRoutesResult?.dijkstra;
         if (activeRoute && activeRoute.coordinates) {
             mapManager.fitRoute(activeRoute.coordinates);
         } else {
@@ -572,226 +489,208 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     ui.elements.btnClearRoute?.addEventListener('click', () => {
+        mapManager.clearRoutes();
+        vehicle.reset();
+        currentRoutesResult = null;
         navigationState.clearRoutes();
-        vehicle.reset();
-        ui.updateComparisonAndExplainability(null);
-        ui.updateProgressBar(0);
-        ui.setStatusBadge('READY', 'badge-idle');
-        ui.showBanner('🧹 Cleared active routes.', 'info');
-        ui.updateDebugHud(graph, null, vehicle);
+        ui.updateTelemetry(null, graph.nodes.get(mapManager.startNodeId), graph.nodes.get(mapManager.endNodeId));
+        ui.updateVehicleProgress(0);
+        ui.showBanner('🧹 Route cleared.', 'info');
     });
 
-    ui.elements.btnResetAll?.addEventListener('click', () => {
-        navigationState.reset();
+    ui.elements.btnReset?.addEventListener('click', () => {
+        mapManager.clearRoutes();
+        mapManager.clearMarkers();
+        vehicle.reset();
         graph.resetState();
-        vehicle.reset();
         mapManager.renderRoadNetwork();
-        ui.updateTripLabels(null, null);
-        ui.updateComparisonAndExplainability(null);
-        ui.updateProgressBar(0);
-        ui.resetTimeline();
-        ui.setStatusBadge('READY', 'badge-idle');
-        ui.showBanner('🔄 Reset all network modifications, shortcuts, and routes to initial state.', 'info');
-        ui.updateDebugHud(graph, null, vehicle);
+        currentRoutesResult = null;
+        navigationState.reset();
+        ui.clearTimeline();
+        ui.updateTelemetry(null, null, null);
+        ui.updateVehicleProgress(0);
+        ui.showBanner('🔄 Reset all network modifications, obstacles, and routes to initial state.', 'info');
     });
 
-    // 12. Settings & Debug Toggles (Section 32 & 33)
-    ui.elements.toggleShowGraph?.addEventListener('change', (e) => {
+    ui.elements.toggleGraph?.addEventListener('change', (e) => {
         mapManager.setGraphOverlayVisibility(e.target.checked);
-        ui.showBanner(e.target.checked ? '👁️ Graph nodes overlay ON' : '🗺️ Graph overlay hidden. Showing clean navigation map.', 'info');
     });
 
     ui.elements.toggleAutoTraffic?.addEventListener('change', (e) => {
         if (e.target.checked) {
             trafficController.start();
-            ui.showBanner('🚦 Automated 3-second traffic light cycling active.', 'info');
+            ui.showBanner('🚦 Automatic 3-second traffic light cycling activated.', 'info');
         } else {
             trafficController.stop();
-            ui.showBanner('🚦 Automated traffic cycling paused.', 'info');
+            ui.showBanner('🚦 Automatic traffic light cycling paused.', 'info');
         }
     });
 
-    ui.elements.toggleShowPOIs?.addEventListener('change', (e) => {
+    ui.elements.togglePOIs?.addEventListener('change', (e) => {
         poiManager.setVisibility(e.target.checked);
     });
 
-    ui.elements.toggleDebugMode?.addEventListener('change', (e) => {
-        if (ui.elements.debugHudPanel) {
-            ui.elements.debugHudPanel.classList.toggle('hidden', !e.target.checked);
-        }
-        ui.updateDebugHud(graph, navigationState.state.activeRoute, vehicle);
-        ui.showBanner(e.target.checked ? '🛠️ Developer Debug HUD enabled' : '🛠️ Debug HUD hidden', 'info');
-    });
-
-    ui.elements.toggleRouteAnchors?.addEventListener('change', (e) => {
-        mapManager.setRouteAnchorsVisibility(e.target.checked);
-        ui.showBanner(e.target.checked ? '📍 Route Anchors overlay ON (START, DESTINATION, ROUTE START, ROUTE END)' : 'Route Anchors hidden', 'info');
-    });
-
-    ui.elements.categoryChips.forEach(chip => {
-        chip.addEventListener('click', () => {
-            ui.elements.categoryChips.forEach(c => c.classList.remove('active'));
-            chip.classList.add('active');
-            poiManager.setCategoryFilter(chip.dataset.category);
-        });
-    });
-
-    // 13. Run Automated Tests Button (Section 52)
-    ui.elements.btnRunTests?.addEventListener('click', async () => {
-        ui.showBanner('🧪 Executing automated test suite (14 tests)... Check Developer Console for live test telemetry.', 'info');
-        ui.setStatusBadge('TESTING', 'badge-calculating');
-        const res = await testSuite.runAllTests();
-        if (res.allPassed) {
-            ui.setStatusBadge('TESTS PASS', 'badge-ready');
-            ui.showBanner(`🎉 <b>All ${res.total} Automated Tests PASSED!</b> Check browser console for full invariant log.`, 'success');
-        } else {
-            ui.setStatusBadge('TESTS FAILED', 'badge-error');
-            ui.showBanner(`⚠️ Automated tests finished: ${res.passed}/${res.total} passed. Check console.`, 'error');
-        }
-    });
-
-    // 14. Demo Presentation Presets
-    ui.elements.demoScenarioSelect?.addEventListener('change', (e) => {
-        const scenario = e.target.value;
-        loadDemoScenario(scenario);
-    });
-
-    function loadDemoScenario(scenarioKey) {
-        graph.resetState();
-        navigationState.reset();
-        vehicle.reset();
-        ui.resetTimeline();
-
-        if (scenarioKey === 'lakdikapul_paradise') {
-            const start = graph.roadNetwork.nodes['lakdikapul'];
-            const end = graph.roadNetwork.nodes['paradise'];
-            navigationState.setStart(start);
-            navigationState.setDestination(end);
-
-            // Condition: Tank Bund South is RED (+30s delay)
-            const tbSig = graph.roadNetwork.signals['sig_tankbund_south'];
-            if (tbSig) tbSig.state = 'RED';
-
-            // Lower Tank Bund Express Bypass is active shortcut (65 km/h)
-            const shortcutEdge = graph.roadNetwork.edges['lower_tankbund--kavadiguda'];
-            if (shortcutEdge) {
-                shortcutEdge.shortcut = true;
-                shortcutEdge.speedKmh = 65;
-            }
-
-            mapManager.renderRoadNetwork();
-            ui.setActiveMode('compare');
-            const routes = calculateAndRenderRoutes();
-
-            if (routes?.dijkstra?.success) {
-                mapManager.fitRoute(routes.dijkstra.coordinates);
-                ui.showBanner('🌟 <b>Demo Loaded:</b> Lakdikapul → Paradise Circle! Normal (Blue): 8.6 min. Dijkstra (Green): 8.1 min. Click <b>▶️ Start Drive</b>!', 'success');
-                ui.addTimelineEvent('Loaded Lakdikapul → Paradise presentation scenario');
-            }
-        } else if (scenarioKey === 'secretariat_begumpet') {
-            const start = graph.roadNetwork.nodes['secretariat'];
-            const end = graph.roadNetwork.nodes['begumpet'];
-            navigationState.setStart(start);
-            navigationState.setDestination(end);
-            mapManager.renderRoadNetwork();
-            ui.setActiveMode('dijkstra');
-            const routes = calculateAndRenderRoutes();
-            if (routes?.dijkstra?.success) {
-                mapManager.fitRoute(routes.dijkstra.coordinates);
-                ui.showBanner('🌟 <b>Demo Loaded:</b> Secretariat → Begumpet Flyover via lakeside corridor.', 'success');
-            }
-        } else if (scenarioKey === 'nampally_ameerpet') {
-            const start = graph.roadNetwork.nodes['nampally'];
-            const end = graph.roadNetwork.nodes['ameerpet'];
-            navigationState.setStart(start);
-            navigationState.setDestination(end);
-            mapManager.renderRoadNetwork();
-            ui.setActiveMode('dijkstra');
-            const routes = calculateAndRenderRoutes();
-            if (routes?.dijkstra?.success) {
-                mapManager.fitRoute(routes.dijkstra.coordinates);
-                ui.showBanner('🌟 <b>Demo Loaded:</b> Nampally Station → Ameerpet Metro.', 'success');
-            }
-        }
-    }
-
-    // 15. Dijkstra Step-by-Step Visualizer
+    // 9. Step-by-Step Dijkstra Algorithm Visualizer
     ui.elements.btnVisualizeDijkstra?.addEventListener('click', async () => {
-        if (!navigationState.state.start.nodeId || !navigationState.state.destination.nodeId) {
-            ui.showBanner('⚠️ Select Start and Destination before visualizing the algorithm.', 'warning');
+        if (!mapManager.startNodeId || !mapManager.endNodeId) {
+            ui.showBanner('⚠️ Select Start and Destination before visualizing Dijkstra.', 'warning');
             return;
         }
 
-        if (isVisualizing) {
-            if (vizAbortController) vizAbortController.abort = true;
-            return;
-        }
+        if (isVisualizing) return;
 
         isVisualizing = true;
-        vizAbortController = { abort: false };
+        vizAbort = false;
         mapManager.clearRoutes();
         vehicle.reset();
+
+        ui.elements.vizOverlayPanel.classList.remove('hidden');
         ui.setStatusBadge('EXPLORING', 'badge-calculating');
 
-        const result = DijkstraRouter.findPath(
+        const result = DijkstraRouter.findShortestPath(
             graph,
-            navigationState.state.start.nodeId,
-            navigationState.state.destination.nodeId,
-            { mode: 'dijkstra', recordSteps: true }
+            mapManager.startNodeId,
+            mapManager.endNodeId,
+            { costType: 'fastest', recordSteps: true }
         );
 
         if (!result.steps || result.steps.length === 0) {
             isVisualizing = false;
+            ui.elements.vizOverlayPanel.classList.add('hidden');
             return;
         }
 
-        ui.showBanner('🧠 Step-by-step Dijkstra node exploration in progress...', 'info');
-
         const vizLayer = L.layerGroup().addTo(mapManager.map);
+        ui.elements.vizNodesCount.textContent = result.nodesExploredCount;
+        ui.elements.vizEdgesCount.textContent = result.edgesEvaluatedCount;
 
         for (let i = 0; i < result.steps.length; i++) {
-            if (vizAbortController.abort) break;
+            if (vizAbort) break;
             const step = result.steps[i];
 
+            ui.elements.vizStepCounter.textContent = `Step ${i + 1}/${result.steps.length}`;
+            ui.elements.vizStepDesc.textContent = step.description;
+
+            if (step.cost !== undefined) {
+                ui.elements.vizCurrentCost.textContent = step.cost.toFixed(1);
+            }
+
             if (step.type === 'visit') {
-                const node = graph.roadNetwork.nodes[step.nodeId];
+                const node = graph.nodes.get(step.nodeId);
                 if (node) {
                     L.circleMarker([node.lat, node.lng], {
                         radius: 7,
-                        fillColor: '#f59e0b',
+                        fillColor: '#facc15',
                         color: '#ffffff',
                         weight: 2,
-                        fillOpacity: 0.9
+                        fillOpacity: 0.95
                     }).addTo(vizLayer);
                 }
             } else if (step.type === 'relax') {
-                const toNode = graph.roadNetwork.nodes[step.toId];
+                const toNode = graph.nodes.get(step.toId);
                 if (toNode) {
                     L.circleMarker([toNode.lat, toNode.lng], {
                         radius: 6,
                         fillColor: '#38bdf8',
                         color: '#ffffff',
                         weight: 2,
-                        fillOpacity: 0.8
+                        fillOpacity: 0.85
                     }).addTo(vizLayer);
                 }
             }
 
-            ui.showBanner(`Dijkstra Step ${i + 1}/${result.steps.length}: ${step.description}`, 'info');
-            await new Promise(r => setTimeout(r, 160));
+            await new Promise(r => setTimeout(r, 220));
         }
 
         setTimeout(() => {
             mapManager.map.removeLayer(vizLayer);
+            ui.elements.vizOverlayPanel.classList.add('hidden');
             isVisualizing = false;
+
             if (result.success) {
                 calculateAndRenderRoutes();
-                ui.showBanner(`🏁 Dijkstra exploration completed! Optimal travel time: <b>${result.estimatedTimeMin} min</b>`, 'success');
+                ui.showBanner(`🏁 Dijkstra exploration complete! Final optimal cost: <b>${result.cost}</b>.`, 'success');
             }
-        }, 500);
+        }, 900);
     });
 
-    // Initialize timeline & HUD
-    ui.resetTimeline();
-    ui.updateDebugHud(graph, null, vehicle);
+    ui.elements.btnStopViz?.addEventListener('click', () => {
+        vizAbort = true;
+    });
+
+    // 10. Pre-Configured College Evaluator Demo Mode
+    ui.elements.btnDemoMode?.addEventListener('click', async () => {
+        // Step 1: Clean reset
+        graph.resetState();
+        mapManager.clearRoutes();
+        mapManager.clearMarkers();
+        vehicle.reset();
+        ui.clearTimeline();
+
+        ui.showBanner('🌟 <b>Demo Mode Loaded:</b> Setting up presentation scenario...', 'info');
+
+        // Step 2: Set Origin (Lakdikapul) & Destination (Paradise Circle)
+        const startNode = graph.nodes.get('lakdikapul');
+        const endNode = graph.nodes.get('paradise');
+
+        setOriginNode(startNode);
+        setDestinationNode(endNode);
+
+        // Step 3: Compute initial routes in Compare Mode
+        ui.setActiveMode('compare');
+        const routes = calculateAndRenderRoutes();
+        mapManager.fitRoute(routes.dijkstra.coordinates);
+
+        ui.showBanner('🌟 <b>Step 1:</b> Lakdikapul → Paradise Circle! Showing both Normal Route (blue) and Dijkstra Fastest (green).', 'success');
+        ui.addTimelineEvent('🌟 Demo initialized: Comparing Lakdikapul → Paradise Circle routes.');
+
+        // Step 4: Launch Vehicle along Dijkstra Route
+        setTimeout(() => {
+            ui.showBanner('🚗 <b>Step 2:</b> Vehicle driving along Dijkstra Route...', 'info');
+            vehicle.start(
+                routes.dijkstra.coordinates,
+                () => {
+                    ui.showBanner('🏁 Demo Scenario Complete: Arrived at Paradise Circle!', 'success');
+                    ui.addTimelineEvent('🏁 Demo Scenario: Vehicle reached Paradise Circle!');
+                    ui.updateVehicleProgress(100);
+                },
+                (prog) => {
+                    ui.updateVehicleProgress(prog);
+                }
+            );
+        }, 800);
+
+        // Step 5: After 3.5 seconds, simulate congested RED light on Tank Bund South & activate Lower Tank Bund shortcut
+        setTimeout(() => {
+            const tbSig = graph.roadNetwork.signals?.['sig_tankbund_south'];
+            if (tbSig) tbSig.state = 'RED';
+
+            const tbNode = graph.nodes.get('tankbund_south');
+            if (tbNode) tbNode.trafficState = 'red';
+
+            // Activate Lower Tank Bund Express Shortcut
+            const shortcutEdge = graph.edges.get('lower_tankbund--kavadiguda');
+            if (shortcutEdge) {
+                shortcutEdge.shortcut = true;
+                shortcutEdge.roadType = 'shortcut';
+                shortcutEdge.speedKmh = 65;
+            }
+            const revShortcut = graph.edges.get('kavadiguda--lower_tankbund');
+            if (revShortcut) {
+                revShortcut.shortcut = true;
+                revShortcut.roadType = 'shortcut';
+                revShortcut.speedKmh = 65;
+            }
+
+            mapManager.renderRoadNetwork();
+
+            // Trigger Dynamic Recalculation
+            handleDynamicTrafficRecalculate();
+            ui.showBanner('🚨 <b>Step 3:</b> Signal at Tank Bund turned RED! Dijkstra instantly detected congestion and rerouted vehicle via Lower Tank Bund Express Shortcut!', 'warning');
+            ui.addTimelineEvent('🚨 Severe RED signal at Tank Bund (+60s). Dijkstra dynamically switched to Lower Tank Bund Express Shortcut!', 'warning');
+        }, 3600);
+    });
+
+    // Initial update
+    ui.resetTelemetryValues();
 });

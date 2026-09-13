@@ -1,168 +1,220 @@
 /**
  * ============================================================================
- * POINTS OF INTEREST & SEARCH ENGINE (js/pois.js)
+ * POINTS OF INTEREST (POI) & SEARCH ENGINE (js/pois.js)
  * ============================================================================
  *
  * Responsibilities:
- * 1. Loads and manages Hyderabad POIs across 8 categories:
- *    Hospital, College, Hotel, Restaurant, Fuel, Metro, Shopping, Landmark.
- * 2. Provides real-time search with instant autocomplete dropdown.
- * 3. Renders clean custom map markers with category badge icons.
- * 4. Supports "Set Start" and "Set Destination" directly from POI markers & search results.
- * 5. Snaps directly to road network nodes (Section 43 & 44).
+ * 1. Manages curated Hyderabad POIs across 8 categories:
+ *    🏥 Hospital, 🎓 College, 🏨 Hotel, 🍴 Restaurant, ⛽ Fuel, 🚇 Metro, 🛍 Shopping, 📍 Landmark.
+ * 2. Renders sleek, uncluttered POI markers with custom SVG pins on Leaflet map.
+ * 3. Provides instant search autocomplete matching POIs, intersections, and landmarks.
+ * 4. Enables 1-click setting of Start / Destination directly from POI popups or search results.
  */
 
+if (typeof require !== 'undefined') {
+    if (typeof HYDERABAD_POIS_DATA === 'undefined') {
+        const dataMod = require('./data.js');
+        globalThis.HYDERABAD_POIS_DATA = dataMod.HYDERABAD_POIS_DATA;
+    }
+}
+
 class POIManager {
-    constructor(leafletMap, onSelectLocation) {
+    constructor(leafletMap, graph, onSelectLocation) {
         this.map = leafletMap;
-        this.onSelectLocation = onSelectLocation; // callback(nodeId, type)
-        this.pois = [];
-        this.markers = new Map(); // id -> L.Marker
-        this.poiLayer = L.layerGroup().addTo(this.map);
+        this.graph = graph;
+        this.onSelectLocation = onSelectLocation; // Callback: (node, type: 'start'|'end')
+
+        this.pois = typeof HYDERABAD_POIS_DATA !== 'undefined' ? HYDERABAD_POIS_DATA : [];
+        this.layerGroup = null;
         this.isVisible = true;
-        this.activeCategoryFilter = 'ALL';
 
-        this.initData();
-    }
-
-    async initData() {
-        try {
-            const resp = await fetch('data/pois.json');
-            if (resp.ok) {
-                this.pois = await resp.json();
-            } else {
-                this.pois = this.getFallbackPOIs();
-            }
-        } catch (e) {
-            this.pois = this.getFallbackPOIs();
+        if (this.map && typeof L !== 'undefined') {
+            this.layerGroup = L.layerGroup().addTo(this.map);
+            this.renderMarkers();
         }
-        this.renderMarkers();
     }
 
-    getFallbackPOIs() {
-        return [
-            { id: "poi_hosp_1", name: "KIMS Hospitals Begumpet", category: "Hospital", icon: "🏥", lat: 17.4420, lng: 78.4720, nearestNode: "begumpet", description: "Multi-specialty hospital near Begumpet flyover." },
-            { id: "poi_hosp_2", name: "Yashoda Hospitals Somajiguda", category: "Hospital", icon: "🏥", lat: 17.4258, lng: 78.4552, nearestNode: "somajiguda", description: "Super-specialty medical center on Raj Bhavan Road." },
-            { id: "poi_coll_1", name: "Nizam College (Osmania University)", category: "College", icon: "🎓", lat: 17.3995, lng: 78.4730, nearestNode: "nampally", description: "Historic constituent college of Osmania University." },
-            { id: "poi_coll_2", name: "Administrative Staff College of India (ASCI)", category: "College", icon: "🎓", lat: 17.4180, lng: 78.4600, nearestNode: "raj_bhavan", description: "Premier management college near Raj Bhavan." },
-            { id: "poi_hotl_1", name: "Hyderabad Marriott Hotel & Convention Centre", category: "Hotel", icon: "🏨", lat: 17.4260, lng: 78.4845, nearestNode: "kavadiguda", description: "Luxury 5-star lakeside hotel near Tank Bund." },
-            { id: "poi_hotl_2", name: "Taj Vivanta Begumpet", category: "Hotel", icon: "🏨", lat: 17.4435, lng: 78.4640, nearestNode: "begumpet", description: "Premium luxury business hotel on Mayur Marg." },
-            { id: "poi_rest_1", name: "Paradise Biryani (Secunderabad Flagship)", category: "Restaurant", icon: "🍴", lat: 17.4422, lng: 78.4878, nearestNode: "paradise", description: "World-renowned Hyderabadi Biryani destination established in 1953." },
-            { id: "poi_rest_2", name: "Eat Street Necklace Road", category: "Restaurant", icon: "🍴", lat: 17.4264, lng: 78.4623, nearestNode: "necklace_mid", description: "Open-air waterfront culinary food court along PVNR Marg." },
-            { id: "poi_fuel_1", name: "HP Auto Fuel Station Lakdikapul", category: "Fuel", icon: "⛽", lat: 17.4035, lng: 78.4625, nearestNode: "lakdikapul", description: "24/7 petrol and clean CNG refueling station." },
-            { id: "poi_fuel_2", name: "IndianOil Fuel Station Tank Bund", category: "Fuel", icon: "⛽", lat: 17.4145, lng: 78.4795, nearestNode: "tankbund_south", description: "Promenade fuel station on Tank Bund." },
-            { id: "poi_metr_1", name: "Khairatabad Metro Station (Red Line)", category: "Metro", icon: "🚇", lat: 17.4116, lng: 78.4611, nearestNode: "khairatabad", description: "Major Hyderabad Metro interchange along Corridor 1." },
-            { id: "poi_metr_2", name: "Ameerpet Metro Station (Red & Blue Lines)", category: "Metro", icon: "🚇", lat: 17.4360, lng: 78.4554, nearestNode: "ameerpet", description: "Largest dual-level junction metro station in Hyderabad." },
-            { id: "poi_metr_3", name: "Paradise Metro Station (Blue Line)", category: "Metro", icon: "🚇", lat: 17.4420, lng: 78.4870, nearestNode: "paradise", description: "Rapid transit station connecting Secunderabad and Hitec City." },
-            { id: "poi_shop_1", name: "Hyderabad Central Mall Punjagutta", category: "Shopping", icon: "🛍️", lat: 17.4270, lng: 78.4523, nearestNode: "punjagutta", description: "Flagship shopping mall and retail hub." },
-            { id: "poi_land_1", name: "BR Ambedkar Telangana State Secretariat", category: "Landmark", icon: "📍", lat: 17.4089, lng: 78.4755, nearestNode: "secretariat", description: "Grand state administration headquarters on lakeside NTR Marg." },
-            { id: "poi_land_2", name: "Tank Bund Road Promenade (Buddha View)", category: "Landmark", icon: "📍", lat: 17.4215, lng: 78.4845, nearestNode: "tankbund_mid", description: "Scenic promenade overlooking historic Hussain Sagar." },
-            { id: "poi_land_3", name: "Sanjeevaiah Park Promenade", category: "Landmark", icon: "📍", lat: 17.4374, lng: 78.4691, nearestNode: "sanjeevaiah", description: "Lush public waterfront park along northern shore." },
-            { id: "poi_land_4", name: "Lumbini Park & Laser Show", category: "Landmark", icon: "📍", lat: 17.4140, lng: 78.4785, nearestNode: "tankbund_south", description: "Waterfront urban park adjacent to Secretariat and Tank Bund." }
-        ];
+    /**
+     * Category Icon Mapping
+     */
+    static getCategoryIcon(cat) {
+        const icons = {
+            hospital: '🏥',
+            college: '🎓',
+            hotel: '🏨',
+            restaurant: '🍴',
+            fuel: '⛽',
+            metro: '🚇',
+            shopping: '🛍',
+            landmark: '📍'
+        };
+        return icons[cat] || '📍';
     }
 
+    /**
+     * Render all POI markers on the Leaflet map layer
+     */
     renderMarkers() {
-        this.poiLayer.clearLayers();
-        this.markers.clear();
+        if (!this.layerGroup) return;
+        this.layerGroup.clearLayers();
 
         if (!this.isVisible) return;
 
         this.pois.forEach(poi => {
-            if (this.activeCategoryFilter !== 'ALL' && poi.category !== this.activeCategoryFilter) {
-                return;
-            }
-
             const iconHtml = `
-                <div class="poi-marker-bubble cat-${poi.category.toLowerCase()}">
-                    <span class="poi-emoji">${poi.icon}</span>
+                <div class="poi-pin-marker ${poi.category}">
+                    <span class="poi-icon">${poi.icon || POIManager.getCategoryIcon(poi.category)}</span>
                 </div>
             `;
 
-            const customIcon = L.divIcon({
-                className: 'custom-poi-marker',
+            const icon = L.divIcon({
+                className: 'custom-poi-div-icon',
                 html: iconHtml,
                 iconSize: [28, 28],
-                iconAnchor: [14, 14]
+                iconAnchor: [14, 28],
+                popupAnchor: [0, -26]
             });
 
-            const marker = L.marker([poi.lat, poi.lng], { icon: customIcon });
+            const marker = L.marker([poi.lat, poi.lng], { icon, zIndexOffset: 600 });
 
             const popupContent = `
                 <div class="poi-popup-card">
                     <div class="poi-popup-header">
-                        <span class="poi-popup-icon">${poi.icon}</span>
-                        <div>
+                        <span class="poi-popup-icon">${poi.icon || '📍'}</span>
+                        <div class="poi-popup-title-group">
                             <h4 class="poi-popup-title">${poi.name}</h4>
-                            <span class="poi-popup-badge">${poi.category}</span>
+                            <span class="poi-popup-category">${poi.category.toUpperCase()}</span>
                         </div>
                     </div>
-                    <p class="poi-popup-desc">${poi.description}</p>
+                    <p class="poi-popup-address">${poi.address}</p>
                     <div class="poi-popup-actions">
-                        <button class="btn btn-sm btn-poi-start" data-node="${poi.nearestNode}">🟢 Set as Start</button>
-                        <button class="btn btn-sm btn-poi-dest" data-node="${poi.nearestNode}">🔴 Set as Destination</button>
+                        <button class="btn btn-sm btn-poi-start" data-poi-id="${poi.id}">🟢 Set as Start</button>
+                        <button class="btn btn-sm btn-poi-end" data-poi-id="${poi.id}">🔴 Set as Destination</button>
                     </div>
                 </div>
             `;
 
-            marker.bindPopup(popupContent, { className: 'poi-custom-popup', maxWidth: 260 });
+            marker.bindPopup(popupContent, { className: 'glass-leaflet-popup', minWidth: 220 });
+
             marker.on('popupopen', () => {
-                setTimeout(() => {
-                    const btnStart = document.querySelector('.btn-poi-start');
-                    const btnDest = document.querySelector('.btn-poi-dest');
-                    if (btnStart) {
-                        btnStart.onclick = () => {
-                            if (this.onSelectLocation) this.onSelectLocation(poi.nearestNode, 'start');
-                            marker.closePopup();
-                        };
-                    }
-                    if (btnDest) {
-                        btnDest.onclick = () => {
-                            if (this.onSelectLocation) this.onSelectLocation(poi.nearestNode, 'end');
-                            marker.closePopup();
-                        };
-                    }
-                }, 10);
+                const el = marker.getPopup().getElement();
+                if (!el) return;
+
+                const btnStart = el.querySelector('.btn-poi-start');
+                const btnEnd = el.querySelector('.btn-poi-end');
+
+                if (btnStart) {
+                    btnStart.onclick = () => {
+                        this.handlePoiSelect(poi, 'start');
+                        marker.closePopup();
+                    };
+                }
+                if (btnEnd) {
+                    btnEnd.onclick = () => {
+                        this.handlePoiSelect(poi, 'end');
+                        marker.closePopup();
+                    };
+                }
             });
 
-            this.poiLayer.addLayer(marker);
-            this.markers.set(poi.id, marker);
+            this.layerGroup.addLayer(marker);
         });
     }
 
-    setVisibility(visible) {
-        this.isVisible = visible;
-        if (visible) {
-            this.renderMarkers();
+    handlePoiSelect(poi, type) {
+        let node = null;
+        if (poi.nearestNode && this.graph.nodes.has(poi.nearestNode)) {
+            node = this.graph.nodes.get(poi.nearestNode);
         } else {
-            this.poiLayer.clearLayers();
+            const snapped = this.graph.findNearestRoadAndNode(poi.lat, poi.lng);
+            node = snapped?.node;
+        }
+
+        if (node && this.onSelectLocation) {
+            this.onSelectLocation(node, type, poi);
         }
     }
 
-    setCategoryFilter(category) {
-        this.activeCategoryFilter = category;
-        this.renderMarkers();
+    setVisibility(visible) {
+        this.isVisible = Boolean(visible);
+        if (this.layerGroup) {
+            if (this.isVisible) {
+                this.renderMarkers();
+                if (!this.map.hasLayer(this.layerGroup)) {
+                    this.map.addLayer(this.layerGroup);
+                }
+            } else {
+                this.layerGroup.clearLayers();
+            }
+        }
     }
 
+    /**
+     * Full-text search matching POIs, intersections, and landmarks
+     */
     search(query) {
-        if (!query || query.trim().length === 0) return [];
-        const q = query.toLowerCase().trim();
-        return this.pois.filter(p =>
-            p.name.toLowerCase().includes(q) ||
-            p.category.toLowerCase().includes(q) ||
-            p.description.toLowerCase().includes(q)
-        );
-    }
+        if (!query || typeof query !== 'string') return [];
+        const q = query.trim().toLowerCase();
+        if (q.length === 0) return [];
 
-    focusPOI(poiId) {
-        const poi = this.pois.find(p => p.id === poiId);
-        if (!poi) return;
+        const results = [];
 
-        this.map.setView([poi.lat, poi.lng], 16, { animate: true });
-        const marker = this.markers.get(poiId);
-        if (marker) {
-            marker.openPopup();
+        // 1. Search POIs
+        this.pois.forEach(poi => {
+            let score = 0;
+            const nameLower = poi.name.toLowerCase();
+            const addrLower = (poi.address || '').toLowerCase();
+            const catLower = poi.category.toLowerCase();
+
+            if (nameLower === q) score += 100;
+            else if (nameLower.startsWith(q)) score += 50;
+            else if (nameLower.includes(q)) score += 30;
+            else if (catLower.startsWith(q)) score += 25;
+            else if (addrLower.includes(q)) score += 15;
+
+            if (score > 0) {
+                results.push({
+                    type: 'poi',
+                    id: poi.id,
+                    title: poi.name,
+                    subtitle: poi.address,
+                    category: poi.category,
+                    icon: poi.icon || POIManager.getCategoryIcon(poi.category),
+                    lat: poi.lat,
+                    lng: poi.lng,
+                    nearestNode: poi.nearestNode,
+                    score
+                });
+            }
+        });
+
+        // 2. Search Graph Intersections / Roads
+        for (const [, node] of this.graph.nodes) {
+            let score = 0;
+            const nameLower = node.name.toLowerCase();
+            if (nameLower === q) score += 90;
+            else if (nameLower.startsWith(q)) score += 45;
+            else if (nameLower.includes(q)) score += 20;
+
+            if (score > 0) {
+                results.push({
+                    type: 'intersection',
+                    id: node.id,
+                    title: node.name,
+                    subtitle: 'Road Intersection / Junction',
+                    category: 'landmark',
+                    icon: '🛣️',
+                    lat: node.lat,
+                    lng: node.lng,
+                    nodeId: node.id,
+                    score
+                });
+            }
         }
+
+        // Sort by relevance score descending
+        results.sort((a, b) => b.score - a.score);
+        return results.slice(0, 7); // Top 7 suggestions
     }
 }
 

@@ -1,24 +1,22 @@
 /**
  * ============================================================================
- * TRAFFIC SIGNAL ARCHITECTURE & CONTROLLER (js/traffic.js)
+ * TRAFFIC LIGHT SYSTEM & CONTROLLER (js/traffic.js)
  * ============================================================================
  *
- * Requirements (Sections 13, 14, 15, 17, 18):
- * 1. Signals belong to REAL graph intersection nodes with >= 2 connected edges.
- * 2. Coordinates strictly derived from roadNetwork.nodes[signal.nodeId].
- * 3. Never placed on water, parks, or arbitrary coordinates.
- * 4. Signal delays: Green = 0s, Yellow = 10s, Red = 30s.
- * 5. 3-Second automated cycle updates signal states and notifies navigation controller.
- * 6. validateTrafficSignals() purges invalid signals from active network.
+ * Responsibilities:
+ * 1. Manages realistic 3-state traffic lights anchored to road intersections.
+ * 2. States: GREEN (0s delay) -> YELLOW (moderate delay) -> RED (high delay) -> GREEN
+ * 3. Automatically cycles traffic signals every 3 seconds when "Auto Traffic" is active.
+ * 4. Notifies listeners (UI and master app controller) to dynamically recalculate Dijkstra.
  */
 
 class TrafficLightController {
     constructor(graph, onStateChange) {
         this.graph = graph;
-        this.onStateChange = onStateChange; // callback(event)
+        this.onStateChange = onStateChange;
         this.timer = null;
         this.isRunning = false;
-        this.intervalMs = 3000; // 3 seconds standard
+        this.intervalMs = 3000; // 3 seconds
     }
 
     /**
@@ -30,7 +28,6 @@ class TrafficLightController {
         this.timer = setInterval(() => {
             this.cycleTick();
         }, this.intervalMs);
-        console.log('[TRAFFIC] Automated 3-second traffic light cycle started');
     }
 
     /**
@@ -42,104 +39,104 @@ class TrafficLightController {
             this.timer = null;
         }
         this.isRunning = false;
-        console.log('[TRAFFIC] Automated traffic light cycle stopped');
     }
 
     /**
-     * Section 14: Add or remove a traffic signal at an intersection
-     * Only permitted if node.type === "intersection" AND node.connectedEdges.length >= 2
+     * Advance signal state: GREEN -> YELLOW -> RED -> GREEN
+     */
+    static getNextState(currentState) {
+        const state = (currentState || 'GREEN').toUpperCase();
+        if (state === 'GREEN') return 'YELLOW';
+        if (state === 'YELLOW') return 'RED';
+        return 'GREEN';
+    }
+
+    /**
+     * Toggle traffic light presence on an intersection node
      */
     toggleTrafficLight(nodeId) {
-        const node = this.graph.roadNetwork.nodes[nodeId];
+        const node = this.graph.nodes.get(nodeId);
         if (!node) return null;
 
-        if (node.trafficSignalId && this.graph.roadNetwork.signals[node.trafficSignalId]) {
-            // Remove existing signal
-            const sigId = node.trafficSignalId;
-            delete this.graph.roadNetwork.signals[sigId];
+        if (node.trafficLight) {
+            node.trafficLight = false;
+            node.trafficState = 'green';
+            if (node.trafficSignalId && this.graph.roadNetwork.signals) {
+                delete this.graph.roadNetwork.signals[node.trafficSignalId];
+                this.graph.signals.delete(node.trafficSignalId);
+            }
             node.trafficSignalId = null;
-            console.log(`[TRAFFIC] Signal removed at ${node.name} (${nodeId})`);
-            this.notify({ type: 'removed', nodeId, signalId: sigId });
+            this.notify({ type: 'removed', nodeId });
             return { action: 'removed', node };
         } else {
-            // Validate before adding
-            if (node.type !== "intersection" || !node.connectedEdges || node.connectedEdges.length < 2) {
-                console.warn(`[TRAFFIC] Cannot place signal on node '${nodeId}': Must be an intersection with >= 2 connected road edges.`);
-                return null;
-            }
-
+            node.trafficLight = true;
+            node.trafficState = 'yellow';
             const sigId = `sig_${nodeId}`;
-            this.graph.roadNetwork.signals[sigId] = {
-                id: sigId,
-                nodeId: node.id,
-                state: "GREEN",
-                delays: { green: 0, yellow: 10, red: 30 }
-            };
             node.trafficSignalId = sigId;
-            console.log(`[TRAFFIC] Signal created at ${node.name} (${nodeId}) -> GREEN`);
-            this.notify({ type: 'added', nodeId, signalId: sigId });
-            return { action: 'added', node, signal: this.graph.roadNetwork.signals[sigId] };
+
+            const newSignal = {
+                id: sigId,
+                nodeId: nodeId,
+                state: 'YELLOW',
+                delays: { green: 0, yellow: 20, red: 60 }
+            };
+
+            if (!this.graph.roadNetwork.signals) {
+                this.graph.roadNetwork.signals = {};
+            }
+            this.graph.roadNetwork.signals[sigId] = newSignal;
+            this.graph.signals.set(sigId, newSignal);
+
+            this.notify({ type: 'added', nodeId, signal: newSignal });
+            return { action: 'added', node, signal: newSignal };
         }
     }
 
     /**
-     * Switch state of a specific traffic light manually
-     * Cycle: GREEN -> YELLOW -> RED -> GREEN
+     * Switch state of a specific traffic light
      */
     switchLight(nodeId) {
-        const node = this.graph.roadNetwork.nodes[nodeId];
-        if (!node || !node.trafficSignalId) return;
+        const node = this.graph.nodes.get(nodeId);
+        if (!node || !node.trafficLight) return;
 
-        const signal = this.graph.roadNetwork.signals[node.trafficSignalId];
-        if (!signal) return;
+        const nextState = TrafficLightController.getNextState(node.trafficState);
+        node.trafficState = nextState.toLowerCase();
 
-        const nextStates = {
-            'GREEN': 'YELLOW',
-            'YELLOW': 'RED',
-            'RED': 'GREEN'
-        };
+        if (node.trafficSignalId && this.graph.roadNetwork.signals?.[node.trafficSignalId]) {
+            this.graph.roadNetwork.signals[node.trafficSignalId].state = nextState;
+        }
 
-        const oldState = signal.state;
-        signal.state = nextStates[signal.state] || 'GREEN';
-
-        console.log(`[TRAFFIC] Signal ${signal.id} at ${node.name} switched from ${oldState} to ${signal.state}`);
-        this.notify({
-            type: 'state_changed',
-            nodeId,
-            signalId: signal.id,
-            state: signal.state
-        });
+        this.notify({ type: 'state_changed', nodeId, state: nextState });
     }
 
     /**
-     * Section 18: Automated 3-second cycle tick
-     * Advances all active signals and triggers dynamic reroute evaluation
+     * Periodic 3-second tick: cycles all active traffic signals
      */
     cycleTick() {
-        const signals = this.graph.roadNetwork.signals;
-        const nextStates = {
-            'GREEN': 'YELLOW',
-            'YELLOW': 'RED',
-            'RED': 'GREEN'
-        };
+        let changed = false;
+        const updatedNodes = [];
 
-        const updatedSignals = [];
+        // Cycle through all defined signals in the network
+        if (this.graph.roadNetwork.signals) {
+            for (const [sigId, signal] of Object.entries(this.graph.roadNetwork.signals)) {
+                const next = TrafficLightController.getNextState(signal.state);
+                signal.state = next;
 
-        for (const [sigId, signal] of Object.entries(signals)) {
-            signal.state = nextStates[signal.state] || 'GREEN';
-            const node = this.graph.roadNetwork.nodes[signal.nodeId];
-            updatedSignals.push({
-                id: sigId,
-                nodeId: signal.nodeId,
-                nodeName: node ? node.name : signal.nodeId,
-                state: signal.state
-            });
+                const node = this.graph.nodes.get(signal.nodeId);
+                if (node) {
+                    node.trafficState = next.toLowerCase();
+                    node.trafficLight = true;
+                }
+
+                changed = true;
+                updatedNodes.push({ id: signal.nodeId, state: next, signalId: sigId });
+            }
         }
 
-        if (updatedSignals.length > 0) {
-            this.notify({
+        if (changed && this.onStateChange) {
+            this.onStateChange({
                 type: 'cycle',
-                updatedSignals
+                updatedNodes
             });
         }
     }
